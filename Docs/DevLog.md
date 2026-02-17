@@ -1,0 +1,30 @@
+# DevLog
+
+## 2026-02-17 - Map generation v1 (noise band-pass labyrinth)
+
+### What changed
+- Added map generation runtime module:
+  - `Assets/_Project/Scripts/Map/TileType.cs`
+  - `Assets/_Project/Scripts/Map/MapConfig.cs`
+  - `Assets/_Project/Scripts/Map/MapData.cs`
+  - `Assets/_Project/Scripts/Map/MapGenerator.cs`
+  - `Assets/_Project/Scripts/Map/MapTilemapRenderer.cs`
+  - `Assets/_Project/Scripts/Map/MapGenerationController.cs`
+- Added implementation plan:
+  - `Plans/MapGenerationV1_ExecPlan.md`
+- Added system documentation:
+  - `Docs/Systems/Map/MapGenerator.md`
+  - `Docs/Architecture/Index.md`
+
+### Why
+- Needed deterministic dense labyrinth maps with walkable/blocked tiles.
+- Needed side gates and enforced gate-to-center connectivity for external spawn access.
+- Needed play-area tilemap rendering plus spawn-ring bounds data/debug.
+
+### How to test
+1. Open `Assets/Scenes/SampleScene.unity`.
+2. Enter Play Mode.
+3. Verify map renders as two tile types (ground/cliff) and center area is open.
+4. Select `Map Generation` object and confirm side gate gizmos on all sides.
+5. Confirm spawn bounds gizmo encloses and extends beyond play bounds.
+6. Trigger `Regenerate Map` from component context menu and verify map rebuilds deterministically for same seed.
