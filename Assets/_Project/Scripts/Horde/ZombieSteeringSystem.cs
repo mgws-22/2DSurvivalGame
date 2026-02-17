@@ -1,4 +1,3 @@
-#if UNITY_ENTITIES
 using Project.Map;
 using Unity.Burst;
 using Unity.Collections;
@@ -168,4 +167,3 @@ namespace Project.Horde
         }
     }
 }
-#endif

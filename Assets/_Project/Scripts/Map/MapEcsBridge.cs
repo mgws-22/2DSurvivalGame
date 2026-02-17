@@ -1,14 +1,9 @@
 using Unity.Mathematics;
-
-#if UNITY_ENTITIES
 using Unity.Collections;
 using Unity.Entities;
-using UnityEngine;
-#endif
 
 namespace Project.Map
 {
-#if UNITY_ENTITIES
     public struct MapRuntimeData : IComponentData
     {
         public int Width;
@@ -47,7 +42,6 @@ namespace Project.Map
 
         public bool IsWalkable => Value != 0;
     }
-#endif
 
     public static class MapEcsBridge
     {
@@ -57,8 +51,6 @@ namespace Project.Map
             {
                 return;
             }
-
-#if UNITY_ENTITIES
             World world = World.DefaultGameObjectInjectionWorld;
             if (world == null || !world.IsCreated)
             {
@@ -109,7 +101,6 @@ namespace Project.Map
                     Value = mapData.IsWalkable(grid.x, grid.y) ? (byte)1 : (byte)0
                 };
             }
-#endif
         }
     }
 }

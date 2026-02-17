@@ -86,3 +86,33 @@
 4. Enter Play Mode and confirm zombies spawn in outer ring, never inside play area at spawn.
 5. Observe zombies move toward map center and do not step onto cliff tiles.
 6. Keep map seed + spawn seed fixed and rerun to validate deterministic spawn pattern.
+
+## 2026-02-17 - ECS authoring compile guard fix (UNITY_ENTITIES)
+
+### What was broken
+- ECS gameplay files were wrapped in `#if UNITY_ENTITIES`.
+- In this project compile context, `UNITY_ENTITIES` was not defined, so entire files were compiled out.
+- Result: bakers (including `ZombieAuthoringBaker`) did not compile/run, and expected baked ECS entities did not appear.
+
+### What changed
+- Removed `#if UNITY_ENTITIES` guards from gameplay-critical ECS files so they always compile with installed Entities package:
+  - `Assets/_Project/Scripts/Horde/ZombieComponents.cs`
+  - `Assets/_Project/Scripts/Horde/ZombieAuthoring.cs`
+  - `Assets/_Project/Scripts/Horde/ZombieSpawnConfigAuthoring.cs`
+  - `Assets/_Project/Scripts/Horde/ZombieSpawnSystem.cs`
+  - `Assets/_Project/Scripts/Horde/ZombieSteeringSystem.cs`
+  - `Assets/_Project/Scripts/Map/MapEcsBridge.cs`
+- Added architecture note:
+  - `Docs/Architecture/ECSCompilation.md`
+  - linked from `Docs/Architecture/Index.md`
+
+### Why this fix
+- The project already depends on `com.unity.entities`.
+- Unconditional compilation avoids hidden failures caused by missing custom symbols and ensures bakers remain active.
+
+### How to test
+1. Let Unity recompile scripts.
+2. Verify `ZombieAuthoring.cs` is no longer greyed out by preprocessor exclusion.
+3. Enter Play Mode with `ZombieAuthoring` prefab + `ZombieSpawnConfigAuthoring` in scene.
+4. Open Entities Hierarchy and search for `ZombieTag` / `ZombieMoveSpeed`.
+5. Confirm baked/spawned entities are present.

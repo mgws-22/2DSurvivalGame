@@ -5,5 +5,8 @@
 - [ZombieSpawnSystem](../Systems/Horde/ZombieSpawnSystem.md)
 - [ZombieSteeringSystem](../Systems/Horde/ZombieSteering.md)
 
+## Build/Compilation
+- [ECS Compilation Expectations](ECSCompilation.md)
+
 ## Logs
 - [DevLog](../DevLog.md)

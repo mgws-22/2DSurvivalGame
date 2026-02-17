@@ -1,4 +1,3 @@
-#if UNITY_ENTITIES
 using Project.Map;
 using Unity.Entities;
 using Unity.Mathematics;
@@ -161,4 +160,3 @@ namespace Project.Horde
         }
     }
 }
-#endif

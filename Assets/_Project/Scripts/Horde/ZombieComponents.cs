@@ -1,4 +1,3 @@
-#if UNITY_ENTITIES
 using Unity.Entities;
 using Unity.Mathematics;
 
@@ -34,4 +33,3 @@ namespace Project.Horde
         public float SpawnAccumulator;
     }
 }
-#endif
