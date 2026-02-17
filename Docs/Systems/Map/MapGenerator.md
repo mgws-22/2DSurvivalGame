@@ -17,7 +17,9 @@ Target shape is a dense labyrinth: mostly cliffs, narrow winding corridors.
 - `MapGenerator` (`Assets/_Project/Scripts/Map/MapGenerator.cs`)
   - Deterministic map generation pipeline.
 - `MapTilemapRenderer` (`Assets/_Project/Scripts/Map/MapTilemapRenderer.cs`)
-  - Renders play area only to a Tilemap.
+  - Renders play area only to a Tilemap with cliff mask autotiling.
+- `CliffTileSet` (`Assets/_Project/Scripts/Map/CliffTileSet.cs`)
+  - ScriptableObject mapping cliff mask (`0-15`) to cliff `TileBase` plus a ground tile.
 - `MapGenerationController` (`Assets/_Project/Scripts/Map/MapGenerationController.cs`)
   - Runtime bootstrap, generation trigger, gizmos, context-menu regenerate.
 
@@ -59,6 +61,22 @@ This creates stripe/isoline-style corridors suitable for labyrinth layouts.
 - `spawnMargin` expands bounds beyond the play area for spawn systems.
 - Spawn ring is represented in `MapData` bounds and gizmos only.
 - Tilemap renderer still renders play area only (`width x height`).
+
+## Rendering: cliff autotile
+- Cliff rendering uses a 4-neighbor mask around each `Cliff` cell.
+- Bits are based on adjacent **ground** neighbors:
+  - `N = 1`, `E = 2`, `S = 4`, `W = 8`
+- Runtime chooses cliff tile by `mask` from `CliffTileSet`.
+- Rendering remains batched via one `SetTilesBlock` call per regenerate.
+
+### Placeholder asset generation
+- Editor menu: `Tools/Map/Generate Placeholder Cliff Tiles`
+- Generator script: `Assets/_Project/Editor/Tools/MapPlaceholderCliffTileGenerator.cs`
+- Outputs:
+  - `16` cliff mask sprites (`CliffMask_0 .. CliffMask_F`) and `Tile` assets
+  - `Ground` sprite and `Ground` tile
+  - `CliffTileSet` asset at `Assets/_Project/Art/Generated/Tiles/Cliff/Resources/Map/CliffTileSet.asset`
+- Generated tiles are deterministic and can be regenerated safely.
 
 ## Invariants
 - Deterministic for identical `MapConfig` + world origin.

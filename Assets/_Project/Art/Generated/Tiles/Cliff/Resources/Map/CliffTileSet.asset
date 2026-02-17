@@ -1,0 +1,32 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0cfa1fa8197a40eeb4064d27475b3e14, type: 3}
+  m_Name: CliffTileSet
+  m_EditorClassIdentifier: Assembly-CSharp::Project.Map.CliffTileSet
+  _groundTile: {fileID: 11400000, guid: 6f5afcad81821ae40865705204ab2b38, type: 2}
+  _cliffMaskTiles:
+  - {fileID: 11400000, guid: 126050f5a262a6e4c98002b2e1eb6489, type: 2}
+  - {fileID: 11400000, guid: febb5e51e2c276e428f976ad42c5223a, type: 2}
+  - {fileID: 11400000, guid: b6acdda9080eb434ea553347ae46583f, type: 2}
+  - {fileID: 11400000, guid: b97be054dd5b6dd4cb1e96badfba0200, type: 2}
+  - {fileID: 11400000, guid: 3429dc2fe4774234c810fade1dc3004d, type: 2}
+  - {fileID: 11400000, guid: 5fc5aeff21efb5a4eb02310748d2f594, type: 2}
+  - {fileID: 11400000, guid: e3ae3dd9228654a4fac5181f393745b2, type: 2}
+  - {fileID: 11400000, guid: e91ce068080b2aa429d717cb29d43041, type: 2}
+  - {fileID: 11400000, guid: 6756206d96b2782418281b7c745db8b8, type: 2}
+  - {fileID: 11400000, guid: e354f50326348944cb4a4c06903e88d4, type: 2}
+  - {fileID: 11400000, guid: 5115fdb73c2e38744b646e8a44e4f144, type: 2}
+  - {fileID: 11400000, guid: 494ca8c367a5c884d81411e0d7d2540c, type: 2}
+  - {fileID: 11400000, guid: 61eb62e808b98464dbbd2cc5e8f32d13, type: 2}
+  - {fileID: 11400000, guid: 4c051c86efbf7e74a82be34bc158065b, type: 2}
+  - {fileID: 11400000, guid: 71d48ede700867545803ca862370a138, type: 2}
+  - {fileID: 11400000, guid: df111bfc4ad4a73409348e7c4b61604a, type: 2}
