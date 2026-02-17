@@ -9,10 +9,12 @@ namespace Project.Horde
     public partial struct ZombieSpawnSystem : ISystem
     {
         private EntityQuery _zombieQuery;
+        private EntityQuery _spawnStateQuery;
 
         public void OnCreate(ref SystemState state)
         {
             _zombieQuery = state.GetEntityQuery(ComponentType.ReadOnly<ZombieTag>());
+            _spawnStateQuery = state.GetEntityQuery(ComponentType.ReadWrite<ZombieSpawnState>());
             state.RequireForUpdate<ZombieSpawnConfig>();
             state.RequireForUpdate<MapRuntimeData>();
         }
@@ -25,7 +27,33 @@ namespace Project.Horde
                 return;
             }
 
-            RefRW<ZombieSpawnState> spawnState = EnsureSpawnState(ref state, config.Seed);
+            EntityManager entityManager = state.EntityManager;
+            Entity spawnStateEntity;
+            ZombieSpawnState stateData;
+
+            if (_spawnStateQuery.IsEmptyIgnoreFilter)
+            {
+                spawnStateEntity = entityManager.CreateEntity(typeof(ZombieSpawnState));
+                stateData = new ZombieSpawnState
+                {
+                    Random = CreateRandom(config.Seed),
+                    LastSeed = config.Seed,
+                    SpawnAccumulator = 0f
+                };
+                entityManager.SetComponentData(spawnStateEntity, stateData);
+            }
+            else
+            {
+                spawnStateEntity = _spawnStateQuery.GetSingletonEntity();
+                stateData = entityManager.GetComponentData<ZombieSpawnState>(spawnStateEntity);
+                if (stateData.LastSeed != config.Seed)
+                {
+                    stateData.Random = CreateRandom(config.Seed);
+                    stateData.LastSeed = config.Seed;
+                    stateData.SpawnAccumulator = 0f;
+                    entityManager.SetComponentData(spawnStateEntity, stateData);
+                }
+            }
 
             int aliveCount = _zombieQuery.CalculateEntityCount();
             if (aliveCount >= config.MaxAlive)
@@ -33,12 +61,11 @@ namespace Project.Horde
                 return;
             }
 
-            ZombieSpawnState stateData = spawnState.ValueRO;
             stateData.SpawnAccumulator += SystemAPI.Time.DeltaTime * config.SpawnRate;
             int waveCount = (int)math.floor(stateData.SpawnAccumulator);
             if (waveCount <= 0)
             {
-                spawnState.ValueRW = stateData;
+                entityManager.SetComponentData(spawnStateEntity, stateData);
                 return;
             }
 
@@ -49,7 +76,7 @@ namespace Project.Horde
             spawnCount = math.min(spawnCount, available);
             if (spawnCount <= 0)
             {
-                spawnState.ValueRW = stateData;
+                entityManager.SetComponentData(spawnStateEntity, stateData);
                 return;
             }
 
@@ -71,36 +98,7 @@ namespace Project.Horde
             }
 
             stateData.Random = random;
-            spawnState.ValueRW = stateData;
-        }
-
-        private static RefRW<ZombieSpawnState> EnsureSpawnState(ref SystemState state, uint seed)
-        {
-            if (!SystemAPI.TryGetSingletonRW(out RefRW<ZombieSpawnState> spawnState))
-            {
-                Entity entity = state.EntityManager.CreateEntity(typeof(ZombieSpawnState));
-                Unity.Mathematics.Random random = CreateRandom(seed);
-                state.EntityManager.SetComponentData(entity, new ZombieSpawnState
-                {
-                    Random = random,
-                    LastSeed = seed,
-                    SpawnAccumulator = 0f
-                });
-
-                spawnState = SystemAPI.GetSingletonRW<ZombieSpawnState>();
-                return spawnState;
-            }
-
-            ZombieSpawnState stateData = spawnState.ValueRO;
-            if (stateData.LastSeed != seed)
-            {
-                stateData.Random = CreateRandom(seed);
-                stateData.LastSeed = seed;
-                stateData.SpawnAccumulator = 0f;
-                spawnState.ValueRW = stateData;
-            }
-
-            return spawnState;
+            entityManager.SetComponentData(spawnStateEntity, stateData);
         }
 
         private static Unity.Mathematics.Random CreateRandom(uint seed)
