@@ -26,6 +26,13 @@ namespace Project.Horde
             {
                 LastDirection = new float2(0f, 0f)
             });
+
+            // Keep SpriteRenderer as a companion component so spawned ECS zombies are visible.
+            SpriteRenderer spriteRenderer = authoring.GetComponent<SpriteRenderer>();
+            if (spriteRenderer != null)
+            {
+                AddComponentObject(entity, spriteRenderer);
+            }
         }
     }
 }

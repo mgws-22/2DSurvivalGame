@@ -143,3 +143,57 @@
 2. Confirm diagnostics show `ZombieSpawnConfig singleton: yes`, `Prefab entity valid: yes`, and `MapRuntimeData singleton: yes`.
 3. Verify zombie entities begin appearing in Entities Hierarchy over time.
 4. Verify zombies spawn in spawn ring and not inside map bounds.
+
+## 2026-02-17 - Zombie spawn root-cause fix (missing config singleton)
+
+### Root cause
+- Diagnostics showed `ZombieSpawnConfig singleton: no` while map data existed.
+- `ZombieSpawnConfigAuthoring` was present in scene, but no runtime config entity was available to spawn system, so it always early-returned.
+- With no config singleton, spawn values defaulted to zero and prefab entity remained invalid (`Entity.Null`).
+
+### What changed
+- Added runtime config bridge to `ZombieSpawnConfigAuthoring`:
+  - `Assets/_Project/Scripts/Horde/ZombieSpawnConfigAuthoring.cs`
+  - On Play, it now ensures a `ZombieSpawnConfig` singleton exists in ECS world and keeps values synced.
+  - If prefab entity is missing/invalid, it logs a one-time warning and keeps prefab as `Entity.Null` until authoring/baking is valid.
+  - Deduplicates accidental multiple `ZombieSpawnConfig` entities to keep singleton semantics.
+- Added scene setup utility:
+  - `Assets/_Project/Editor/Tools/SurvivalSceneSetupTool.cs`
+  - Menu: `Tools/Survival/Setup Zombie Demo Scene`
+  - Ensures `ZombieSpawnConfigAuthoring` exists and assigns default prefab/tuning values.
+- Improved one-time spawn diagnostics with explicit action hints:
+  - `Assets/_Project/Scripts/Horde/ZombieSpawnSystem.cs`
+
+### How to verify
+1. In editor, run `Tools > Survival > Setup Zombie Demo Scene`.
+2. Enter Play Mode.
+3. Console should show exactly one `ZombieSpawnSystem` diagnostics block with actionable status.
+4. Entities Hierarchy should contain a `ZombieSpawnConfig` entity with non-zero values and non-null prefab entity.
+5. Zombie entity count should increase over time; spawn pattern remains deterministic for same seed/config.
+
+## 2026-02-17 - Zombie visibility fix (prefab baked without render companion)
+
+### Root cause
+- Spawn diagnostics could be fully green while zombies were still not visible.
+- `ZombieAuthoringBaker` only added gameplay ECS components (`ZombieTag`, speed/state) but did not preserve `SpriteRenderer` on the prefab entity, so spawned zombies could be simulation-only entities.
+- Runtime fallback prefab creation in `ZombieSpawnConfigRuntimeBridge` also produced gameplay-only prefab entities with no visual component.
+
+### What changed
+- Updated zombie baking to keep visuals on spawned ECS entities:
+  - `Assets/_Project/Scripts/Horde/ZombieAuthoring.cs`
+  - baker now adds `SpriteRenderer` as a companion component.
+- Hardened runtime config bridge to avoid creating invisible fallback prefabs:
+  - `Assets/_Project/Scripts/Horde/ZombieSpawnConfigAuthoring.cs`
+  - if prefab entity is invalid, config now stays `Entity.Null` and logs actionable warning once in Editor/Development builds.
+- Extended one-time spawn diagnostics:
+  - `Assets/_Project/Scripts/Horde/ZombieSpawnSystem.cs`
+  - now logs whether prefab has `SpriteRenderer` companion.
+  - logs one first-spawn batch summary (count + first spawn world position) for quick on-screen/off-screen validation.
+- Updated system docs:
+  - `Docs/Systems/Horde/ZombieSpawnSystem.md`
+
+### How to verify
+1. Enter Play Mode in `Assets/Scenes/SampleScene.unity`.
+2. Check one-time spawn diagnostics and confirm `Prefab has SpriteRenderer companion: yes`.
+3. Confirm zombie entity count increases over time in Entities Hierarchy.
+4. Confirm zombies are visible in Game view and keep moving toward map center.

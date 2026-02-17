@@ -31,7 +31,7 @@ Spawn ring rule:
 - Left strip
 - Right strip
 6. Convert sampled grid cell to world position using map origin + tile size.
-7. Instantiate with ECB (`EndSimulationEntityCommandBufferSystem`).
+7. Instantiate with ECB (`EndSimulationEntityCommandBufferSystem`) and apply spawn position while preserving prefab rotation/scale.
 
 ## Determinism
 - RNG is seeded from config seed and stored in `ZombieSpawnState`.
@@ -51,6 +51,9 @@ Spawn ring rule:
 - `ZombieSpawnConfigAuthoring` (`Assets/_Project/Scripts/Horde/ZombieSpawnConfigAuthoring.cs`)
   - place on a scene object
   - set zombie prefab and spawn tuning values
+- `ZombieAuthoring` (`Assets/_Project/Scripts/Horde/ZombieAuthoring.cs`)
+  - prefab must include this component for ECS gameplay data
+  - baker also keeps `SpriteRenderer` as companion component so spawned ECS zombies are visible in Game view
 
 ## Verification
 1. Enter Play Mode.
