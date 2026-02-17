@@ -1,0 +1,43 @@
+# Unity generated
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Mm]emoryCaptures/
+
+# Asset meta data should be kept
+!/[Aa]ssets/**/*.meta
+
+# IDE / OS junk
+.vs/
+.idea/
+*.user
+*.suo
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# Visual Studio / Unity generated solution/project files
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.log
+
+# Rider / JetBrains
+*.DotSettings.user
+
+# macOS / Windows
+.DS_Store
+Thumbs.db
+
+# Crash reports
+sysinfo.txt
