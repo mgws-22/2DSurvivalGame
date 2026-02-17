@@ -188,10 +188,12 @@
   - when multiple config entities exist, keeps the one that already has a valid prefab and removes duplicates.
   - actively searches for a baked zombie prefab entity (`Prefab + ZombieTag`) and keeps retrying sync until resolved.
   - editor-only fallback auto-finds a prefab with `ZombieAuthoring` if `_zombiePrefab` is empty.
+  - editor runtime fallback requests prefab conversion through `EntityPrefabReference` + `RequestEntityPrefabLoaded`, then binds `PrefabLoadResult.PrefabRoot` into `ZombieSpawnConfig`.
 - Extended one-time spawn diagnostics:
   - `Assets/_Project/Scripts/Horde/ZombieSpawnSystem.cs`
   - now logs whether prefab has `SpriteRenderer` companion.
   - logs one first-spawn batch summary (count + first spawn world position) for quick on-screen/off-screen validation.
+  - delays one-time diagnostics briefly to avoid false negatives while async prefab load resolves.
 - Updated system docs:
   - `Docs/Systems/Horde/ZombieSpawnSystem.md`
 

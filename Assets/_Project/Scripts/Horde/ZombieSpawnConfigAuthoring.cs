@@ -1,6 +1,8 @@
 using Unity.Entities;
 using Unity.Collections;
+using Unity.Entities.Serialization;
 using Unity.Mathematics;
+using Unity.Scenes;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -24,6 +26,26 @@ namespace Project.Horde
         public int Seed => _seed;
 
         private bool _pendingRuntimeSync;
+
+        private void Reset()
+        {
+#if UNITY_EDITOR
+            if (!Application.isPlaying && _zombiePrefab == null)
+            {
+                _zombiePrefab = ZombieSpawnConfigEditorResolver.FindZombiePrefab();
+            }
+#endif
+        }
+
+        private void OnValidate()
+        {
+#if UNITY_EDITOR
+            if (!Application.isPlaying && _zombiePrefab == null)
+            {
+                _zombiePrefab = ZombieSpawnConfigEditorResolver.FindZombiePrefab();
+            }
+#endif
+        }
 
         private void OnEnable()
         {
@@ -111,6 +133,10 @@ namespace Project.Horde
         private static bool s_loggedMissingPrefab;
         private static bool s_loggedMissingZombieAuthoring;
 #endif
+#if UNITY_EDITOR
+        private static Entity s_prefabLoadRequestEntity;
+        private static EntityPrefabReference s_prefabLoadReference;
+#endif
 
         public static bool Sync(ZombieSpawnConfigAuthoring authoring)
         {
@@ -162,6 +188,13 @@ namespace Project.Horde
             {
                 prefabEntity = FindZombiePrefabEntity(entityManager);
             }
+
+#if UNITY_EDITOR
+            if (!IsValidZombiePrefabEntity(entityManager, prefabEntity))
+            {
+                TryResolvePrefabFromEntityPrefabReference(entityManager, authoring.ZombiePrefab, out prefabEntity);
+            }
+#endif
 
             if (!IsValidZombiePrefabEntity(entityManager, prefabEntity))
             {
@@ -265,6 +298,83 @@ namespace Project.Horde
             prefabQuery.Dispose();
             return prefabEntity;
         }
+
+#if UNITY_EDITOR
+        private static bool TryResolvePrefabFromEntityPrefabReference(
+            EntityManager entityManager,
+            GameObject zombiePrefab,
+            out Entity prefabEntity)
+        {
+            prefabEntity = Entity.Null;
+            if (zombiePrefab == null)
+            {
+                return false;
+            }
+
+            EntityPrefabReference prefabReference = new EntityPrefabReference(zombiePrefab);
+            if (!prefabReference.IsReferenceValid)
+            {
+                return false;
+            }
+
+            if (s_prefabLoadRequestEntity == Entity.Null || !entityManager.Exists(s_prefabLoadRequestEntity))
+            {
+                s_prefabLoadRequestEntity = entityManager.CreateEntity(typeof(RequestEntityPrefabLoaded));
+                entityManager.SetComponentData(s_prefabLoadRequestEntity, new RequestEntityPrefabLoaded
+                {
+                    Prefab = prefabReference
+                });
+                s_prefabLoadReference = prefabReference;
+                return false;
+            }
+
+            bool referenceChanged = s_prefabLoadReference != prefabReference;
+            if (referenceChanged)
+            {
+                s_prefabLoadReference = prefabReference;
+                if (entityManager.Exists(s_prefabLoadRequestEntity))
+                {
+                    entityManager.DestroyEntity(s_prefabLoadRequestEntity);
+                }
+
+                s_prefabLoadRequestEntity = entityManager.CreateEntity(typeof(RequestEntityPrefabLoaded));
+                entityManager.SetComponentData(s_prefabLoadRequestEntity, new RequestEntityPrefabLoaded
+                {
+                    Prefab = prefabReference
+                });
+                return false;
+            }
+
+            if (entityManager.HasComponent<RequestEntityPrefabLoaded>(s_prefabLoadRequestEntity))
+            {
+                entityManager.SetComponentData(s_prefabLoadRequestEntity, new RequestEntityPrefabLoaded
+                {
+                    Prefab = prefabReference
+                });
+            }
+            else
+            {
+                entityManager.AddComponentData(s_prefabLoadRequestEntity, new RequestEntityPrefabLoaded
+                {
+                    Prefab = prefabReference
+                });
+            }
+
+            if (!entityManager.HasComponent<PrefabLoadResult>(s_prefabLoadRequestEntity))
+            {
+                return false;
+            }
+
+            PrefabLoadResult result = entityManager.GetComponentData<PrefabLoadResult>(s_prefabLoadRequestEntity);
+            if (!IsValidZombiePrefabEntity(entityManager, result.PrefabRoot))
+            {
+                return false;
+            }
+
+            prefabEntity = result.PrefabRoot;
+            return true;
+        }
+#endif
 
     }
 }

@@ -33,6 +33,10 @@ Spawn ring rule:
 6. Convert sampled grid cell to world position using map origin + tile size.
 7. Instantiate with ECB (`EndSimulationEntityCommandBufferSystem`) and apply spawn position while preserving prefab rotation/scale.
 
+Prefab resolution fallback (Editor):
+- If `ZombieSpawnConfig.Prefab` is unresolved, runtime bridge first searches existing prefab entities.
+- If still unresolved, it requests async load through `EntityPrefabReference` and waits for `PrefabLoadResult`.
+
 ## Determinism
 - RNG is seeded from config seed and stored in `ZombieSpawnState`.
 - For same seed/config and same update timing, spawn cell sequence is stable.
@@ -52,6 +56,7 @@ Spawn ring rule:
   - place on a scene object
   - set zombie prefab and spawn tuning values
   - Editor fallback: if prefab is empty, it auto-selects the first project prefab containing `ZombieAuthoring`
+  - Runtime bridge fallback (Editor): if `Prefab` entity is unresolved, requests load via `EntityPrefabReference` and resolves once `PrefabLoadResult` arrives
 - `ZombieAuthoring` (`Assets/_Project/Scripts/Horde/ZombieAuthoring.cs`)
   - prefab must include this component for ECS gameplay data
   - baker also keeps `SpriteRenderer` as companion component so spawned ECS zombies are visible in Game view

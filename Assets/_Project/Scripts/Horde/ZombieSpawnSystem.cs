@@ -16,6 +16,7 @@ namespace Project.Horde
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
         private static bool s_loggedSpawnDiagnostics;
         private static bool s_loggedFirstSpawnBatch;
+        private static int s_spawnDiagnosticsFrameCount;
 #endif
 
         public void OnCreate(ref SystemState state)
@@ -53,20 +54,33 @@ namespace Project.Horde
 #endif
             }
 
-            LogSpawnDiagnosticsOnce(
-                hasConfig,
-                hasMap,
-                config,
-                mapData,
-                config.Prefab != Entity.Null,
-                prefabEntityValid,
-                prefabHasZombieTag,
-                prefabHasPrefabTag,
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                prefabHasSpriteRenderer,
-                prefabScale,
+            s_spawnDiagnosticsFrameCount++;
+            bool shouldLogDiagnostics =
+                prefabEntityValid ||
+                !hasConfig ||
+                !hasMap ||
+                s_spawnDiagnosticsFrameCount >= 120;
+#else
+            const bool shouldLogDiagnostics = true;
 #endif
-                aliveCountBeforeSpawn);
+            if (shouldLogDiagnostics)
+            {
+                LogSpawnDiagnosticsOnce(
+                    hasConfig,
+                    hasMap,
+                    config,
+                    mapData,
+                    config.Prefab != Entity.Null,
+                    prefabEntityValid,
+                    prefabHasZombieTag,
+                    prefabHasPrefabTag,
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    prefabHasSpriteRenderer,
+                    prefabScale,
+#endif
+                    aliveCountBeforeSpawn);
+            }
 
             if (!hasConfig || !hasMap || !prefabEntityValid)
             {
@@ -196,7 +210,7 @@ namespace Project.Horde
             }
             else if (!prefabAssigned)
             {
-                actionHint = "ZombieSpawnConfig exists, but Prefab is Entity.Null. Assign _zombiePrefab on ZombieSpawnConfigAuthoring (or run Tools/Survival/Setup Zombie Demo Scene). Runtime bridge retries until a valid prefab entity is available.";
+                actionHint = "ZombieSpawnConfig exists, but Prefab is Entity.Null. Assign _zombiePrefab on ZombieSpawnConfigAuthoring (or run Tools/Survival/Setup Zombie Demo Scene). Runtime bridge retries and requests EntityPrefabReference load until a valid prefab entity is available.";
             }
             else if (!prefabEntityValid)
             {
