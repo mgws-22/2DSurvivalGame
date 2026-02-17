@@ -196,7 +196,7 @@ namespace Project.Horde
             }
             else if (!prefabAssigned)
             {
-                actionHint = "ZombieSpawnConfig exists, but Prefab is Entity.Null. Assign _zombiePrefab on ZombieSpawnConfigAuthoring.";
+                actionHint = "ZombieSpawnConfig exists, but Prefab is Entity.Null. Assign _zombiePrefab on ZombieSpawnConfigAuthoring (or run Tools/Survival/Setup Zombie Demo Scene). Runtime bridge retries until a valid prefab entity is available.";
             }
             else if (!prefabEntityValid)
             {

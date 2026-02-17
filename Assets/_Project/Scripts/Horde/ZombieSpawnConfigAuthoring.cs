@@ -2,6 +2,9 @@ using Unity.Entities;
 using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace Project.Horde
 {
@@ -29,6 +32,12 @@ namespace Project.Horde
                 return;
             }
 
+#if UNITY_EDITOR
+            if (_zombiePrefab == null)
+            {
+                _zombiePrefab = ZombieSpawnConfigEditorResolver.FindZombiePrefab();
+            }
+#endif
             _pendingRuntimeSync = !ZombieSpawnConfigRuntimeBridge.Sync(this);
         }
 
@@ -66,6 +75,36 @@ namespace Project.Horde
         }
     }
 
+#if UNITY_EDITOR
+    internal static class ZombieSpawnConfigEditorResolver
+    {
+        public static GameObject FindZombiePrefab()
+        {
+            string[] guids = AssetDatabase.FindAssets("t:Prefab");
+            GameObject found = null;
+            string foundPath = null;
+
+            for (int i = 0; i < guids.Length; i++)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guids[i]);
+                GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+                if (prefab == null || prefab.GetComponent<ZombieAuthoring>() == null)
+                {
+                    continue;
+                }
+
+                if (found == null || string.CompareOrdinal(path, foundPath) < 0)
+                {
+                    found = prefab;
+                    foundPath = path;
+                }
+            }
+
+            return found;
+        }
+    }
+#endif
+
     internal static class ZombieSpawnConfigRuntimeBridge
     {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -98,13 +137,19 @@ namespace Project.Horde
             else
             {
                 using NativeArray<Entity> entities = query.ToEntityArray(Allocator.Temp);
-                configEntity = entities[0];
+                configEntity = SelectConfigEntity(entityManager, entities);
 
-                for (int i = 1; i < entities.Length; i++)
+                for (int i = 0; i < entities.Length; i++)
                 {
-                    if (entityManager.Exists(entities[i]))
+                    Entity entity = entities[i];
+                    if (entity == configEntity)
                     {
-                        entityManager.DestroyEntity(entities[i]);
+                        continue;
+                    }
+
+                    if (entityManager.Exists(entity))
+                    {
+                        entityManager.DestroyEntity(entity);
                     }
                 }
             }
@@ -113,6 +158,11 @@ namespace Project.Horde
 
             ZombieSpawnConfig config = entityManager.GetComponentData<ZombieSpawnConfig>(configEntity);
             Entity prefabEntity = config.Prefab;
+            if (!IsValidZombiePrefabEntity(entityManager, prefabEntity))
+            {
+                prefabEntity = FindZombiePrefabEntity(entityManager);
+            }
+
             if (!IsValidZombiePrefabEntity(entityManager, prefabEntity))
             {
                 prefabEntity = Entity.Null;
@@ -143,7 +193,7 @@ namespace Project.Horde
             config.Prefab = prefabEntity;
 
             entityManager.SetComponentData(configEntity, config);
-            return true;
+            return IsValidZombiePrefabEntity(entityManager, config.Prefab);
         }
 
         private static bool IsValidZombiePrefabEntity(EntityManager entityManager, Entity prefabEntity)
@@ -152,6 +202,68 @@ namespace Project.Horde
                    entityManager.Exists(prefabEntity) &&
                    entityManager.HasComponent<Prefab>(prefabEntity) &&
                    entityManager.HasComponent<ZombieTag>(prefabEntity);
+        }
+
+        private static Entity SelectConfigEntity(EntityManager entityManager, NativeArray<Entity> entities)
+        {
+            if (entities.Length == 0)
+            {
+                return Entity.Null;
+            }
+
+            Entity fallback = entities[0];
+            for (int i = 0; i < entities.Length; i++)
+            {
+                Entity entity = entities[i];
+                if (!entityManager.Exists(entity))
+                {
+                    continue;
+                }
+
+                ZombieSpawnConfig config = entityManager.GetComponentData<ZombieSpawnConfig>(entity);
+                if (IsValidZombiePrefabEntity(entityManager, config.Prefab))
+                {
+                    return entity;
+                }
+            }
+
+            return fallback;
+        }
+
+        private static Entity FindZombiePrefabEntity(EntityManager entityManager)
+        {
+            EntityQueryDesc prefabQueryDesc = new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Prefab>(),
+                    ComponentType.ReadOnly<ZombieTag>()
+                },
+                Options = EntityQueryOptions.IncludePrefab | EntityQueryOptions.IncludeDisabledEntities
+            };
+
+            EntityQuery prefabQuery = entityManager.CreateEntityQuery(prefabQueryDesc);
+            using NativeArray<Entity> entities = prefabQuery.ToEntityArray(Allocator.Temp);
+            Entity prefabEntity = Entity.Null;
+            for (int i = 0; i < entities.Length; i++)
+            {
+                Entity candidate = entities[i];
+                if (!entityManager.Exists(candidate))
+                {
+                    continue;
+                }
+
+                if (!entityManager.HasComponent<ZombieMoveSpeed>(candidate))
+                {
+                    continue;
+                }
+
+                prefabEntity = candidate;
+                break;
+            }
+
+            prefabQuery.Dispose();
+            return prefabEntity;
         }
 
     }

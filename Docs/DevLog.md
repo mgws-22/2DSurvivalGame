@@ -185,6 +185,9 @@
 - Hardened runtime config bridge to avoid creating invisible fallback prefabs:
   - `Assets/_Project/Scripts/Horde/ZombieSpawnConfigAuthoring.cs`
   - if prefab entity is invalid, config now stays `Entity.Null` and logs actionable warning once in Editor/Development builds.
+  - when multiple config entities exist, keeps the one that already has a valid prefab and removes duplicates.
+  - actively searches for a baked zombie prefab entity (`Prefab + ZombieTag`) and keeps retrying sync until resolved.
+  - editor-only fallback auto-finds a prefab with `ZombieAuthoring` if `_zombiePrefab` is empty.
 - Extended one-time spawn diagnostics:
   - `Assets/_Project/Scripts/Horde/ZombieSpawnSystem.cs`
   - now logs whether prefab has `SpriteRenderer` companion.

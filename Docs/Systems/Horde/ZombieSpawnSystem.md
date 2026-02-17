@@ -51,6 +51,7 @@ Spawn ring rule:
 - `ZombieSpawnConfigAuthoring` (`Assets/_Project/Scripts/Horde/ZombieSpawnConfigAuthoring.cs`)
   - place on a scene object
   - set zombie prefab and spawn tuning values
+  - Editor fallback: if prefab is empty, it auto-selects the first project prefab containing `ZombieAuthoring`
 - `ZombieAuthoring` (`Assets/_Project/Scripts/Horde/ZombieAuthoring.cs`)
   - prefab must include this component for ECS gameplay data
   - baker also keeps `SpriteRenderer` as companion component so spawned ECS zombies are visible in Game view
