@@ -22,6 +22,8 @@ Target shape is a dense labyrinth: mostly cliffs, narrow winding corridors.
   - ScriptableObject mapping cliff mask (`0-15`) to cliff `TileBase` plus a ground tile.
 - `MapGenerationController` (`Assets/_Project/Scripts/Map/MapGenerationController.cs`)
   - Runtime bootstrap, generation trigger, gizmos, context-menu regenerate.
+- `MapEcsBridge` (`Assets/_Project/Scripts/Map/MapEcsBridge.cs`)
+  - Publishes generated map metadata and walkability grid into ECS singleton/buffer for simulation systems.
 
 ## Generation Pipeline
 1. **Noise field (deterministic)**
@@ -83,6 +85,13 @@ This creates stripe/isoline-style corridors suitable for labyrinth layouts.
 - Center-open area is always ground.
 - Gates exist on each side when `gateCountPerSide > 0`.
 - Final walkable cells are center-reachable.
+
+## ECS Bridge
+- On each regenerate, `MapGenerationController` calls `MapEcsBridge.Sync(CurrentMap)`.
+- Bridge data:
+  - `MapRuntimeData` singleton: width/height/tileSize/origin/spawnMargin/center
+  - `MapWalkableCell` dynamic buffer: dense walkability grid (`0/1`)
+- This enables Burst ECS systems to query map walkability without managed `MapData` access.
 
 ## Performance Notes
 - Generation is init/regenerate-time only; no per-frame allocation from this module.

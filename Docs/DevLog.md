@@ -53,3 +53,36 @@
 3. Enter Play Mode in `Assets/Scenes/SampleScene.unity`.
 4. Verify cliffs now show border/edge variation around corridors.
 5. Trigger `Regenerate Map` and confirm output remains deterministic for the same seed/config.
+
+## 2026-02-17 - Zombie spawn ring + center steering (ECS)
+
+### What changed
+- Added map-to-ECS runtime bridge:
+  - `Assets/_Project/Scripts/Map/MapEcsBridge.cs`
+  - `Assets/_Project/Scripts/Map/MapGenerationController.cs` (sync call on regenerate)
+- Added zombie ECS components and authoring:
+  - `Assets/_Project/Scripts/Horde/ZombieComponents.cs`
+  - `Assets/_Project/Scripts/Horde/ZombieAuthoring.cs`
+  - `Assets/_Project/Scripts/Horde/ZombieSpawnConfigAuthoring.cs`
+- Added zombie ECS systems:
+  - `Assets/_Project/Scripts/Horde/ZombieSpawnSystem.cs`
+  - `Assets/_Project/Scripts/Horde/ZombieSteeringSystem.cs`
+- Added plan + docs:
+  - `Plans/ZombieSpawnSteering_ExecPlan.md`
+  - `Docs/Systems/Horde/ZombieSpawnSystem.md`
+  - `Docs/Systems/Horde/ZombieSteering.md`
+  - `Docs/Architecture/Index.md` (links)
+  - `Docs/Systems/Map/MapGenerator.md` (ECS bridge section)
+
+### Why
+- Needed deterministic zombie spawning in spawn ring (outside map bounds).
+- Needed simple center-seeking movement that does not step onto cliff cells.
+- Needed Burst-friendly, allocation-free ECS loop with no pathfinding dependency.
+
+### How to test
+1. Ensure Entities package is installed/enabled in the project.
+2. Add `ZombieAuthoring` to zombie prefab and set move speed.
+3. Add `ZombieSpawnConfigAuthoring` to a scene object and assign zombie prefab/config values.
+4. Enter Play Mode and confirm zombies spawn in outer ring, never inside play area at spawn.
+5. Observe zombies move toward map center and do not step onto cliff tiles.
+6. Keep map seed + spawn seed fixed and rerun to validate deterministic spawn pattern.

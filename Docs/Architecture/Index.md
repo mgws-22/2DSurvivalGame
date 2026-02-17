@@ -2,6 +2,8 @@
 
 ## Systems
 - [Map Generator (v1)](../Systems/Map/MapGenerator.md)
+- [ZombieSpawnSystem](../Systems/Horde/ZombieSpawnSystem.md)
+- [ZombieSteeringSystem](../Systems/Horde/ZombieSteering.md)
 
 ## Logs
 - [DevLog](../DevLog.md)

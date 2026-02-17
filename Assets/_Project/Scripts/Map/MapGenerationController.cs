@@ -61,6 +61,7 @@ namespace Project.Map
 
             float2 origin = new float2(transform.position.x, transform.position.y);
             CurrentMap = MapGenerator.Generate(_config, origin);
+            MapEcsBridge.Sync(CurrentMap);
             _tilemapRenderer.Render(CurrentMap);
         }
 

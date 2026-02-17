@@ -1,0 +1,115 @@
+using Unity.Mathematics;
+
+#if UNITY_ENTITIES
+using Unity.Collections;
+using Unity.Entities;
+using UnityEngine;
+#endif
+
+namespace Project.Map
+{
+#if UNITY_ENTITIES
+    public struct MapRuntimeData : IComponentData
+    {
+        public int Width;
+        public int Height;
+        public int SpawnMargin;
+        public float TileSize;
+        public float2 Origin;
+        public float2 CenterWorld;
+
+        public float3 GridToWorld(int2 grid, float z)
+        {
+            float2 world = Origin + ((new float2(grid.x + 0.5f, grid.y + 0.5f)) * TileSize);
+            return new float3(world.x, world.y, z);
+        }
+
+        public int2 WorldToGrid(float2 world)
+        {
+            float2 local = (world - Origin) / TileSize;
+            return (int2)math.floor(local);
+        }
+
+        public bool IsInMap(int2 grid)
+        {
+            return grid.x >= 0 && grid.y >= 0 && grid.x < Width && grid.y < Height;
+        }
+
+        public int ToIndex(int2 grid)
+        {
+            return grid.x + (grid.y * Width);
+        }
+    }
+
+    public struct MapWalkableCell : IBufferElementData
+    {
+        public byte Value;
+
+        public bool IsWalkable => Value != 0;
+    }
+#endif
+
+    public static class MapEcsBridge
+    {
+        public static void Sync(MapData mapData)
+        {
+            if (mapData == null)
+            {
+                return;
+            }
+
+#if UNITY_ENTITIES
+            World world = World.DefaultGameObjectInjectionWorld;
+            if (world == null || !world.IsCreated)
+            {
+                return;
+            }
+
+            EntityManager entityManager = world.EntityManager;
+            EntityQuery query = entityManager.CreateEntityQuery(
+                ComponentType.ReadWrite<MapRuntimeData>(),
+                ComponentType.ReadWrite<MapWalkableCell>());
+
+            Entity mapEntity;
+            if (query.IsEmptyIgnoreFilter)
+            {
+                mapEntity = entityManager.CreateEntity(typeof(MapRuntimeData), typeof(MapWalkableCell));
+            }
+            else
+            {
+                mapEntity = query.GetSingletonEntity();
+            }
+
+            query.Dispose();
+
+            float2 centerWorld = mapData.WorldOrigin +
+                (new float2(mapData.Width * mapData.TileSize, mapData.Height * mapData.TileSize) * 0.5f);
+
+            MapRuntimeData runtimeData = new MapRuntimeData
+            {
+                Width = mapData.Width,
+                Height = mapData.Height,
+                SpawnMargin = mapData.SpawnMargin,
+                TileSize = mapData.TileSize,
+                Origin = mapData.WorldOrigin,
+                CenterWorld = centerWorld
+            };
+
+            entityManager.SetComponentData(mapEntity, runtimeData);
+
+            DynamicBuffer<MapWalkableCell> walkable = entityManager.GetBuffer<MapWalkableCell>(mapEntity);
+            int tileCount = mapData.TileCount;
+            walkable.ResizeUninitialized(tileCount);
+
+            for (int i = 0; i < tileCount; i++)
+            {
+                int2 grid = mapData.IndexToGrid(i);
+                walkable[i] = new MapWalkableCell
+                {
+                    Value = mapData.IsWalkable(grid.x, grid.y) ? (byte)1 : (byte)0
+                };
+            }
+#endif
+        }
+    }
+}
