@@ -2,6 +2,9 @@ using Project.Map;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Transforms;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+using UnityEngine;
+#endif
 
 namespace Project.Horde
 {
@@ -10,24 +13,55 @@ namespace Project.Horde
     {
         private EntityQuery _zombieQuery;
         private EntityQuery _spawnStateQuery;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private static bool s_loggedSpawnDiagnostics;
+#endif
 
         public void OnCreate(ref SystemState state)
         {
             _zombieQuery = state.GetEntityQuery(ComponentType.ReadOnly<ZombieTag>());
             _spawnStateQuery = state.GetEntityQuery(ComponentType.ReadWrite<ZombieSpawnState>());
-            state.RequireForUpdate<ZombieSpawnConfig>();
-            state.RequireForUpdate<MapRuntimeData>();
         }
 
         public void OnUpdate(ref SystemState state)
         {
-            ZombieSpawnConfig config = SystemAPI.GetSingleton<ZombieSpawnConfig>();
-            if (config.Prefab == Entity.Null || config.SpawnRate <= 0f || config.SpawnBatchSize <= 0 || config.MaxAlive <= 0)
+            EntityManager entityManager = state.EntityManager;
+
+            bool hasConfig = SystemAPI.TryGetSingleton(out ZombieSpawnConfig config);
+            bool hasMap = SystemAPI.TryGetSingleton(out MapRuntimeData mapData);
+            int aliveCountBeforeSpawn = _zombieQuery.CalculateEntityCount();
+
+            bool prefabEntityValid = false;
+            bool prefabHasZombieTag = false;
+            bool prefabHasPrefabTag = false;
+            if (hasConfig && config.Prefab != Entity.Null && entityManager.Exists(config.Prefab))
+            {
+                prefabHasZombieTag = entityManager.HasComponent<ZombieTag>(config.Prefab);
+                prefabHasPrefabTag = entityManager.HasComponent<Prefab>(config.Prefab);
+                prefabEntityValid = prefabHasPrefabTag;
+            }
+
+            LogSpawnDiagnosticsOnce(
+                hasConfig,
+                hasMap,
+                config,
+                mapData,
+                config.Prefab != Entity.Null,
+                prefabEntityValid,
+                prefabHasZombieTag,
+                prefabHasPrefabTag,
+                aliveCountBeforeSpawn);
+
+            if (!hasConfig || !hasMap || !prefabEntityValid)
             {
                 return;
             }
 
-            EntityManager entityManager = state.EntityManager;
+            if (config.SpawnRate <= 0f || config.SpawnBatchSize <= 0 || config.MaxAlive <= 0)
+            {
+                return;
+            }
+
             Entity spawnStateEntity;
             ZombieSpawnState stateData;
 
@@ -55,8 +89,7 @@ namespace Project.Horde
                 }
             }
 
-            int aliveCount = _zombieQuery.CalculateEntityCount();
-            if (aliveCount >= config.MaxAlive)
+            if (aliveCountBeforeSpawn >= config.MaxAlive)
             {
                 return;
             }
@@ -72,15 +105,13 @@ namespace Project.Horde
             int spawnCount = waveCount * config.SpawnBatchSize;
             stateData.SpawnAccumulator -= waveCount;
 
-            int available = config.MaxAlive - aliveCount;
+            int available = config.MaxAlive - aliveCountBeforeSpawn;
             spawnCount = math.min(spawnCount, available);
             if (spawnCount <= 0)
             {
                 entityManager.SetComponentData(spawnStateEntity, stateData);
                 return;
             }
-
-            MapRuntimeData mapData = SystemAPI.GetSingleton<MapRuntimeData>();
 
             EntityCommandBuffer ecb = SystemAPI
                 .GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>()
@@ -99,6 +130,42 @@ namespace Project.Horde
 
             stateData.Random = random;
             entityManager.SetComponentData(spawnStateEntity, stateData);
+        }
+
+        private static void LogSpawnDiagnosticsOnce(
+            bool hasConfig,
+            bool hasMap,
+            ZombieSpawnConfig config,
+            MapRuntimeData mapData,
+            bool prefabAssigned,
+            bool prefabEntityValid,
+            bool prefabHasZombieTag,
+            bool prefabHasPrefabTag,
+            int zombieCountBeforeSpawn)
+        {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (s_loggedSpawnDiagnostics)
+            {
+                return;
+            }
+
+            s_loggedSpawnDiagnostics = true;
+
+            string mapSummary = hasMap
+                ? $"yes (w={mapData.Width}, h={mapData.Height}, margin={mapData.SpawnMargin})"
+                : "no";
+
+            Debug.Log(
+                "[ZombieSpawnSystem] Diagnostics (once)\n" +
+                $"- ZombieSpawnConfig singleton: {(hasConfig ? "yes" : "no")}\n" +
+                $"- Prefab assigned (Entity.Null?): {(prefabAssigned ? "yes" : "no")}\n" +
+                $"- Prefab entity valid: {(prefabEntityValid ? "yes" : "no")}\n" +
+                $"- Prefab has ZombieTag: {(prefabHasZombieTag ? "yes" : "no")}\n" +
+                $"- Prefab has Prefab tag: {(prefabHasPrefabTag ? "yes" : "no")}\n" +
+                $"- MapRuntimeData singleton: {mapSummary}\n" +
+                $"- spawnRate={config.SpawnRate}, spawnBatchSize={config.SpawnBatchSize}, maxAlive={config.MaxAlive}, seed={config.Seed}\n" +
+                $"- Zombie count before spawn: {zombieCountBeforeSpawn}");
+#endif
         }
 
         private static Unity.Mathematics.Random CreateRandom(uint seed)

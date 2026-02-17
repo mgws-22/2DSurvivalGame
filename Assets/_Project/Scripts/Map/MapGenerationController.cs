@@ -17,6 +17,8 @@ namespace Project.Map
         [SerializeField] private Color _spawnBoundsColor = Color.yellow;
         [SerializeField] private Color _gateColor = Color.cyan;
 
+        private bool _pendingMapEcsSync;
+
         public MapData CurrentMap { get; private set; }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -61,8 +63,18 @@ namespace Project.Map
 
             float2 origin = new float2(transform.position.x, transform.position.y);
             CurrentMap = MapGenerator.Generate(_config, origin);
-            MapEcsBridge.Sync(CurrentMap);
+            _pendingMapEcsSync = !MapEcsBridge.Sync(CurrentMap);
             _tilemapRenderer.Render(CurrentMap);
+        }
+
+        private void LateUpdate()
+        {
+            if (!_pendingMapEcsSync || CurrentMap == null)
+            {
+                return;
+            }
+
+            _pendingMapEcsSync = !MapEcsBridge.Sync(CurrentMap);
         }
 
         private void EnsureRenderer()

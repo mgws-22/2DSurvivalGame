@@ -116,3 +116,30 @@
 3. Enter Play Mode with `ZombieAuthoring` prefab + `ZombieSpawnConfigAuthoring` in scene.
 4. Open Entities Hierarchy and search for `ZombieTag` / `ZombieMoveSpeed`.
 5. Confirm baked/spawned entities are present.
+
+## 2026-02-17 - Zombie spawn no-show fix (map ECS sync + one-time diagnostics)
+
+### What was wrong
+- `ZombieSpawnSystem` could be blocked by missing `MapRuntimeData` and return before any spawn work.
+- `MapEcsBridge.Sync` was called once during map regeneration; if ECS default world was not ready at that moment, sync no-oped and map singleton never appeared.
+
+### What changed
+- Added retry-safe map ECS sync:
+  - `Assets/_Project/Scripts/Map/MapEcsBridge.cs`
+    - `Sync(MapData)` now returns `bool` success/failure.
+  - `Assets/_Project/Scripts/Map/MapGenerationController.cs`
+    - tracks pending sync and retries in `LateUpdate` until successful.
+- Added one-time Editor/Development diagnostics in spawn system:
+  - `Assets/_Project/Scripts/Horde/ZombieSpawnSystem.cs`
+    - logs once: config presence, prefab validity/tags, map singleton presence + dimensions, spawn params, zombie count.
+    - missing requirements now return after emitting that single diagnostic block.
+
+### Why this fixes it
+- Guarantees `MapRuntimeData` eventually exists even if initial map generation runs before ECS world creation.
+- Diagnostics make missing config/prefab/map immediately visible without runtime log spam.
+
+### How to test
+1. Enter Play Mode and check Console for one `ZombieSpawnSystem` diagnostics block.
+2. Confirm diagnostics show `ZombieSpawnConfig singleton: yes`, `Prefab entity valid: yes`, and `MapRuntimeData singleton: yes`.
+3. Verify zombie entities begin appearing in Entities Hierarchy over time.
+4. Verify zombies spawn in spawn ring and not inside map bounds.

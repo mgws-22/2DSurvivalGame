@@ -45,16 +45,16 @@ namespace Project.Map
 
     public static class MapEcsBridge
     {
-        public static void Sync(MapData mapData)
+        public static bool Sync(MapData mapData)
         {
             if (mapData == null)
             {
-                return;
+                return false;
             }
             World world = World.DefaultGameObjectInjectionWorld;
             if (world == null || !world.IsCreated)
             {
-                return;
+                return false;
             }
 
             EntityManager entityManager = world.EntityManager;
@@ -101,6 +101,8 @@ namespace Project.Map
                     Value = mapData.IsWalkable(grid.x, grid.y) ? (byte)1 : (byte)0
                 };
             }
+
+            return true;
         }
     }
 }
