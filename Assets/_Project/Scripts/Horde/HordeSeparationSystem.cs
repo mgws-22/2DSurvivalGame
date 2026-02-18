@@ -17,6 +17,7 @@ namespace Project.Horde
         private NativeList<float2> _positionsA;
         private NativeList<float2> _positionsB;
         private NativeParallelMultiHashMap<int, int> _cellToIndex;
+        private ComponentLookup<LocalTransform> _localTransformLookup;
 
         public void OnCreate(ref SystemState state)
         {
@@ -28,6 +29,7 @@ namespace Project.Horde
             _positionsA = new NativeList<float2>(1024, Allocator.Persistent);
             _positionsB = new NativeList<float2>(1024, Allocator.Persistent);
             _cellToIndex = new NativeParallelMultiHashMap<int, int>(4096, Allocator.Persistent);
+            _localTransformLookup = state.GetComponentLookup<LocalTransform>(false);
 
             state.RequireForUpdate(_zombieQuery);
             state.RequireForUpdate<HordeSeparationConfig>();
@@ -92,6 +94,7 @@ namespace Project.Horde
             float maxPush = math.max(0f, config.MaxPushPerFrame);
             int maxNeighbors = math.clamp(config.MaxNeighbors, 4, 64);
             int iterations = math.clamp(config.Iterations, 1, 2);
+            _localTransformLookup.Update(ref state);
 
             EnsureCapacity(count);
             _entities.ResizeUninitialized(count);
@@ -150,7 +153,7 @@ namespace Project.Horde
             {
                 Entities = _entities.AsArray(),
                 Positions = sourcePositions,
-                Transforms = state.GetComponentLookup<LocalTransform>(false)
+                Transforms = _localTransformLookup
             };
             state.Dependency = applyJob.Schedule(count, 128, state.Dependency);
         }
