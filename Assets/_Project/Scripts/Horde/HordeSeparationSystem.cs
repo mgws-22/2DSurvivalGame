@@ -38,7 +38,7 @@ namespace Project.Horde
                 Entity configEntity = state.EntityManager.CreateEntity(typeof(HordeSeparationConfig));
                 state.EntityManager.SetComponentData(configEntity, new HordeSeparationConfig
                 {
-                    Radius = 0.05f,
+                    Radius = 0.1f,
                     CellSizeFactor = 1.25f,
                     InfluenceRadiusFactor = 1.5f,
                     SeparationStrength = 0.7f,
