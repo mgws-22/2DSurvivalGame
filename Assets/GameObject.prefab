@@ -104,4 +104,4 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fc9048ddbf414a5888e556ce243d3046, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Project.Horde.ZombieAuthoring
-  _moveSpeed: 2
+  _moveSpeed: 1

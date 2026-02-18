@@ -12,6 +12,7 @@ namespace Project.Horde
     [UpdateAfter(typeof(ZombieSteeringSystem))]
     public partial struct HordeSeparationSystem : ISystem
     {
+        private static bool s_loggedSkipDueToHardSolver;
         private EntityQuery _zombieQuery;
         private NativeList<Entity> _entities;
         private NativeList<float2> _positionsA;
@@ -43,12 +44,12 @@ namespace Project.Horde
                 Entity configEntity = state.EntityManager.CreateEntity(typeof(HordeSeparationConfig));
                 state.EntityManager.SetComponentData(configEntity, new HordeSeparationConfig
                 {
-                    Radius = 0.12f,
-                    CellSizeFactor = 1.1f,
-                    InfluenceRadiusFactor = 2.4f,
-                    SeparationStrength = 1.0f,
-                    MaxPushPerFrame = 0.25f,
-                    MaxNeighbors = 40,
+                    Radius = 0.2f,
+                    CellSizeFactor = 10f,
+                    InfluenceRadiusFactor = 2f,
+                    SeparationStrength = 150f,
+                    MaxPushPerFrame = 10f,
+                    MaxNeighbors = 28,
                     Iterations = 1
 
                 });
@@ -85,6 +86,24 @@ namespace Project.Horde
 
         public void OnUpdate(ref SystemState state)
         {
+            if (SystemAPI.TryGetSingleton(out HordeHardSeparationConfig hardConfig) && hardConfig.Enabled != 0)
+            {
+                if (!s_loggedSkipDueToHardSolver)
+                {
+                    UnityEngine.Debug.Log("HordeSeparationSystem skipped because HordeHardSeparationConfig.Enabled != 0.");
+                    s_loggedSkipDueToHardSolver = true;
+                }
+
+                return;
+            }
+
+            if (SystemAPI.TryGetSingleton(out HordePressureConfig pressureConfig) &&
+                pressureConfig.Enabled != 0 &&
+                pressureConfig.DisablePairwiseSeparationWhenPressureEnabled != 0)
+            {
+                return;
+            }
+
             int count = _zombieQuery.CalculateEntityCount();
             if (count <= 1)
             {
@@ -154,7 +173,8 @@ namespace Project.Horde
                     MaxNeighbors = maxNeighbors,
                     MoveSpeeds = _moveSpeeds.AsArray(),
                     DeltaTime = SystemAPI.Time.DeltaTime,
-                    Iterations = iterations
+                    Iterations = iterations,
+                    CurrentIteration = iteration
                 };
                 state.Dependency = separateJob.Schedule(count, 128, state.Dependency);
 
@@ -227,6 +247,9 @@ namespace Project.Horde
         [BurstCompile]
         private struct SeparateJob : IJobParallelFor
         {
+            private const float ZeroDistanceSq = 1e-12f;
+            private const float Diagonal = 0.70710677f;
+
             [ReadOnly] public NativeArray<float2> Positions;
             [ReadOnly] public NativeParallelMultiHashMap<int, int> Grid;
             [NativeDisableParallelForRestriction] public NativeArray<float2> CorrectedPositions;
@@ -240,6 +263,7 @@ namespace Project.Horde
             [ReadOnly] public NativeArray<float> MoveSpeeds;
             public float DeltaTime;
             public int Iterations;
+            public int CurrentIteration;
 
             public void Execute(int index)
             {
@@ -268,17 +292,29 @@ namespace Project.Horde
 
                             float2 delta = pos - Positions[neighborIndex];
                             float distSq = math.lengthsq(delta);
-                            if (distSq <= 0.000001f || distSq > InfluenceRadiusSq)
+                            if (distSq > InfluenceRadiusSq)
                             {
                                 continue;
                             }
 
                             if (distSq < MinDistSq)
                             {
-                                float invDist = math.rsqrt(distSq);
-                                float dist = distSq * invDist;
+                                float2 normal;
+                                float dist;
+                                if (distSq <= ZeroDistanceSq)
+                                {
+                                    normal = DeterministicNormal(index, neighborIndex, CurrentIteration);
+                                    dist = 0f;
+                                }
+                                else
+                                {
+                                    float invDist = math.rsqrt(distSq);
+                                    dist = distSq * invDist;
+                                    normal = delta * invDist;
+                                }
+
                                 float push = MinDist - dist;
-                                correction += delta * (invDist * push);
+                                correction += normal * push;
                                 processed++;
                                 if (processed >= MaxNeighbors)
                                 {
@@ -319,6 +355,28 @@ namespace Project.Horde
                 }
 
                 CorrectedPositions[index] = pos;
+            }
+
+            private static float2 DeterministicNormal(int index, int neighborIndex, int iteration)
+            {
+                uint h = (uint)index * 0x9E3779B9u;
+                h ^= ((uint)neighborIndex * 0x85EBCA6Bu);
+                h ^= ((uint)iteration * 0xC2B2AE35u);
+                h ^= h >> 16;
+                h *= 0x7FEB352Du;
+                h ^= h >> 15;
+
+                switch ((int)(h & 7u))
+                {
+                    case 0: return new float2(1f, 0f);
+                    case 1: return new float2(Diagonal, Diagonal);
+                    case 2: return new float2(0f, 1f);
+                    case 3: return new float2(-Diagonal, Diagonal);
+                    case 4: return new float2(-1f, 0f);
+                    case 5: return new float2(-Diagonal, -Diagonal);
+                    case 6: return new float2(0f, -1f);
+                    default: return new float2(Diagonal, -Diagonal);
+                }
             }
         }
 

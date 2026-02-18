@@ -7,7 +7,7 @@ namespace Project.Horde
     public sealed class ZombieAuthoring : MonoBehaviour
     {
         [Min(0f)]
-        [SerializeField] private float _moveSpeed = 2f;
+        [SerializeField] private float _moveSpeed = 1f;
 
         public float MoveSpeed => _moveSpeed;
     }

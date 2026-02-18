@@ -350,6 +350,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1862250333}
   - component: {fileID: 1862250332}
+  - component: {fileID: 1862250334}
   m_Layer: 0
   m_Name: GameObject
   m_TagString: Untagged
@@ -370,9 +371,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Project.Horde.ZombieSpawnConfigAuthoring
   _zombiePrefab: {fileID: 2940900018987325336, guid: 4272358af0497654bbe12dbc757acdf4, type: 3}
-  _spawnRate: 1
+  _spawnRate: 22
   _spawnBatchSize: 222
-  _maxAlive: 222223
+  _maxAlive: 22222
   _seed: 12345
 --- !u!4 &1862250333
 Transform:
@@ -389,6 +390,25 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1862250334
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1862250331}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 838d5e0ba0764374a3f721627eb7b9e4, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Project.Horde.HordeHardSeparationConfigAuthoring
+  _enabled: 1
+  _radius: 0.4
+  _cellSize: 0.1
+  _maxNeighbors: 28
+  _iterations: 2
+  _maxCorrectionPerIter: 0.08
+  _slop: 0.09
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

@@ -51,4 +51,28 @@ namespace Project.Horde
         public float MaxWallPushPerFrame;
         public int ProjectionSearchRadiusCells;
     }
+
+    public struct HordeHardSeparationConfig : IComponentData
+    {
+        public byte Enabled;
+        public float Radius;
+        public float CellSize;
+        public int MaxNeighbors;
+        public int Iterations;
+        public float MaxCorrectionPerIter;
+        public float Slop;
+    }
+
+    public struct HordePressureConfig : IComponentData
+    {
+        public byte Enabled;
+        public float TargetUnitsPerCell;
+        public float PressureStrength;
+        public float MaxPushPerFrame;
+        public float SpeedFractionCap;
+        public float BlockedCellPenalty;
+        public int FieldUpdateIntervalFrames;
+        public int BlurPasses;
+        public byte DisablePairwiseSeparationWhenPressureEnabled;
+    }
 }

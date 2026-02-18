@@ -11,14 +11,17 @@ Prevent zombie overlap at high entity counts without Unity Physics by applying g
 
 ## Algorithm
 Per frame:
+1. If `HordeHardSeparationConfig` exists and `Enabled != 0`, skip this system (soft + hard do not run together).
+1. If `HordePressureConfig.Enabled != 0` and `DisablePairwiseSeparationWhenPressureEnabled != 0`, skip soft pairwise separation.
 1. Snapshot zombie entities and positions.
 2. Build uniform spatial hash grid (`NativeParallelMultiHashMap<int,int>`).
 3. For each zombie, inspect only 3x3 neighbor cells.
 4. Early-cull neighbors outside `influenceRadius`.
 5. Accumulate separation correction when neighbor distance is below `minDist = 2*radius`.
-6. Stop processing neighbors when `maxNeighbors` is reached (bounded worst-case).
-7. Clamp correction by `min(maxPushPerFrame, moveSpeed * dt)` (per iteration) so total soft push cannot exceed unit speed budget.
-8. Apply corrected positions.
+6. Exact-overlap pairs (`dist == 0`) use deterministic fallback normals so stacked entities can still separate.
+7. Stop processing neighbors when `maxNeighbors` is reached (bounded worst-case).
+8. Clamp correction by `min(maxPushPerFrame, moveSpeed * dt)` (per iteration) so total soft push cannot exceed unit speed budget.
+9. Apply corrected positions.
 
 Optional second pass is supported via `Iterations` (clamped to `1..2`).
 
@@ -33,6 +36,8 @@ Optional second pass is supported via `Iterations` (clamped to `1..2`).
 
 ## Invariants
 - Only zombies are moved by separation.
+- Missing hard-separation config is treated as hard solver disabled, so soft separation still runs.
+- Pressure mode can disable this system entirely to favor `O(N + G)` field-based congestion control.
 - No per-frame managed allocations.
 - No `O(N^2)` all-pairs scan.
 - Soft displacement from separation is tied to each zombie's `ZombieMoveSpeed`.

@@ -463,3 +463,179 @@
 2. Verify correction remains immediate but without large outward launch jumps.
 3. Confirm zombies still never remain inside blocked cells.
 4. Profile gameplay and confirm `GC Alloc` remains `0 B`.
+
+## 2026-02-18 - Hard separation solver added (Jacobi/PBD, default disabled)
+
+### What changed
+- Added hard separation config component:
+  - `Assets/_Project/Scripts/Horde/ZombieComponents.cs`
+  - new `HordeHardSeparationConfig` (`Enabled`, `Radius`, `CellSize`, `MaxNeighbors`, `Iterations`, `MaxCorrectionPerIter`, `Slop`)
+- Added scene authoring + baker for singleton config:
+  - `Assets/_Project/Scripts/Horde/HordeHardSeparationConfigAuthoring.cs`
+  - default `Enabled = 0` to keep gameplay unchanged unless manually toggled.
+- Added runtime hard separation system:
+  - `Assets/_Project/Scripts/Horde/HordeHardSeparationSystem.cs`
+  - snapshots positions, builds spatial hash, runs capped-neighbor Jacobi iterations, writes back final positions.
+  - deterministic fallback normal for near-zero pair distance.
+  - profiler markers added for `BuildGrid`, `IterationCompute`, `IterationApply`, `WriteBack`.
+- Added docs:
+  - `Docs/Systems/Horde/HordeHardSeparation.md`
+  - `Docs/Architecture/Index.md`
+
+### Why
+- Needed a stronger no-overlap option than soft push while preserving ECS/Burst scaling and race safety.
+- Kept it opt-in (`Enabled = 0`) so existing behavior does not change by default.
+
+### How to test
+1. Add `HordeHardSeparationConfigAuthoring` to a scene object.
+2. Enter Play Mode with `Enabled` left off and confirm current behavior is unchanged.
+3. Toggle `Enabled` on and verify dense zombie overlap is reduced.
+4. Profile hot gameplay and confirm `GC Alloc` stays `0 B` with no job safety errors.
+
+## 2026-02-18 - Hard solver runtime wiring (order + soft-solver gating)
+
+### What changed
+- Updated hard solver order and runtime diagnostics:
+  - `Assets/_Project/Scripts/Horde/HordeHardSeparationSystem.cs`
+  - added `UpdateBefore(WallRepulsionSystem)` (while keeping `UpdateAfter(ZombieSteeringSystem)`).
+  - added one-time log when hard solver starts running (`Enabled=1`).
+- Added soft solver gate to prevent double correction:
+  - `Assets/_Project/Scripts/Horde/HordeSeparationSystem.cs`
+  - early return when `HordeHardSeparationConfig` exists and `Enabled != 0`.
+  - missing hard config is treated as hard-disabled (soft solver runs normally).
+  - added one-time log when soft solver is skipped due to hard solver being enabled.
+- Updated docs:
+  - `Docs/Systems/Horde/HordeSeparation.md`
+  - `Docs/Systems/Horde/HordeHardSeparation.md`
+
+### Why
+- Ensure intended runtime pipeline: steering -> hard separation (when enabled) -> wall repulsion.
+- Avoid soft+hard separation running together and over-correcting zombie positions.
+
+### How to test
+1. Leave `HordeHardSeparationConfig.Enabled = 0` (or remove the config) and verify soft separation still behaves as before.
+2. Set `Enabled = 1` and confirm:
+   - one-time log from hard solver appears,
+   - one-time soft-solver skip log appears,
+   - wall repulsion still executes after separation.
+3. Confirm no compilation errors, job safety warnings, or GC spikes in gameplay.
+
+## 2026-02-18 - Density/pressure congestion field on expanded flow grid
+
+### What changed
+- Added pressure-field config:
+  - `Assets/_Project/Scripts/Horde/ZombieComponents.cs`
+  - new `HordePressureConfig` (`Enabled`, density target, push caps, blur/tick settings, soft-separation gating flag)
+- Added pressure-field runtime system:
+  - `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`
+  - runs after steering and before separation solvers
+  - builds per-cell density on the expanded `FlowFieldBlob` grid
+  - converts density to pressure (+ blocked-cell penalty), optional blur, applies bounded anti-pressure push per zombie
+  - rejects pressure moves into blocked expanded cells
+- Added optional soft pairwise separation gating:
+  - `Assets/_Project/Scripts/Horde/HordeSeparationSystem.cs`
+  - skips soft solver when pressure config is enabled and `DisablePairwiseSeparationWhenPressureEnabled != 0`
+- Added plan and docs:
+  - `Plans/HordePressureField_ExecPlan.md`
+  - `Docs/Systems/Horde/HordePressureField.md`
+  - `Docs/Systems/Horde/HordeSeparation.md`
+  - `Docs/Architecture/Index.md`
+
+### Why
+- Pairwise-only local separation can still create long-lived crowd compression in chokepoints and near walls.
+- Needed an `O(N + G)` congestion signal (`N` entities, `G` expanded-grid cells) aligned with the same expanded flow grid used for center steering.
+- Needed bounded steering influence so movement remains speed-capped while wall projection remains final blocked-cell safety.
+
+### How to test
+1. Enter Play Mode in `Assets/Scenes/SampleScene.unity`.
+2. Spawn dense hordes near narrow corridors and wall bends.
+3. Verify crowds gradually fan out instead of staying permanently jammed.
+4. Verify zombies still converge to center (single-point target unchanged).
+5. Verify zombies are not left inside blocked map tiles after wall repulsion.
+6. Profile hot loop and confirm `GC Alloc` remains `0 B` with no new sync-point stalls.
+
+## 2026-02-18 - Pressure anti-stack fix (deterministic spread + safer default)
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`:
+  - default `DisablePairwiseSeparationWhenPressureEnabled` changed to `0` (augment mode by default).
+  - pressure direction now includes deterministic per-entity spread bias when many units share same local pressure.
+  - fallback direction now uses deterministic unit direction instead of zero vector.
+  - update order is steering -> pressure -> separation/hard separation -> wall safety.
+- Updated `Assets/Scenes/SampleScene.unity`:
+  - `HordeHardSeparationConfigAuthoring._enabled` set to `0` so sample scene validates pressure+soft behavior by default.
+- Updated docs:
+  - `Docs/Systems/Horde/HordePressureField.md`
+
+### Why
+- In dense same-cell cases, many units could pick identical pressure direction and continue moving as one compact stack.
+- Augment-by-default plus deterministic spread reduces persistent clumping while preserving Burst/jobified behavior and wall safety.
+
+### How to test
+1. Enter Play Mode and spawn ~200+ zombies in a tight group.
+2. Confirm the group fans out over time instead of remaining a single compact stack/column.
+3. Verify units still move toward center and are not left in blocked tiles.
+4. Profile and confirm `GC Alloc` stays `0 B`.
+
+## 2026-02-18 - Soft separation zero-distance fix (exact overlap unstuck)
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordeSeparationSystem.cs`:
+  - exact-overlap neighbor pairs (`distSq == 0`) are no longer ignored.
+  - added deterministic fallback normal for zero-distance pairs, keyed by entity pair + iteration.
+  - per-iteration index now passed into separation job for deterministic tie-breaking.
+- Updated docs:
+  - `Docs/Systems/Horde/HordeSeparation.md`
+
+### Why
+- Repeated spawns/stacking can produce identical positions; previous soft solver skipped those pairs and they could remain clumped in a single point/line.
+- Deterministic zero-distance handling keeps separation Burst-safe, allocation-free, and stable across frames.
+
+### How to test
+1. Spawn 200+ zombies with intentionally dense overlap.
+2. Verify previously stacked units now begin separating instead of remaining in one point.
+3. Confirm movement still heads toward center and wall projection still prevents blocked-tile residency.
+4. Profile gameplay: `GC Alloc` remains `0 B`.
+
+## 2026-02-18 - Pressure center-lock fix (center-away bias + pairwise augmentation default)
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`:
+  - default `DisablePairwiseSeparationWhenPressureEnabled` set to `0` so soft separation augments pressure by default.
+  - increased default pressure speed budget (`SpeedFractionCap = 1`) so anti-jam push can match base movement budget.
+  - `ApplyPressureJob` now uses `EntityIndexInQuery` for deterministic per-entity tie-breaking.
+  - tie/symmetry fallback now biases away from `MapRuntimeData.CenterWorld` plus deterministic jitter, instead of returning zero.
+  - pressure gradient / best-neighbor / wall-gradient directions now include spread bias to avoid lockstep columns.
+- Updated docs:
+  - `Docs/Systems/Horde/HordePressureField.md`
+
+### Why
+- Dense groups near center can create near-symmetric local pressure where many entities choose identical directions or no direction.
+- Center-away deterministic bias prevents point-lock while preserving single-point goal steering, Burst compatibility, and allocation-free hot paths.
+
+### How to test
+1. Enter Play Mode and let ~200+ zombies converge toward center.
+2. Confirm they do not remain pinned in one exact point/column.
+3. Verify wall safety still holds (no entities left in blocked tiles).
+4. Profile and confirm `GC Alloc` remains `0 B`.
+
+## 2026-02-18 - Pressure motion stabilization (remove "extra force" feel)
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`:
+  - retuned defaults to softer pressure steering (`TargetUnitsPerCell=2.5`, `PressureStrength=0.75`, `MaxPushPerFrame=0.12`, `SpeedFractionCap=0.4`).
+  - removed strong center-away fallback from pressure tie handling.
+  - added flow-alignment constraint so pressure steering cannot strongly oppose local flow-to-center direction.
+  - kept deterministic tie-break bias but reduced it to a mild spread term.
+- Updated docs:
+  - `Docs/Systems/Horde/HordePressureField.md`
+
+### Why
+- Previous anti-lock tuning solved point clumping but produced unnatural pathing that looked like an external force field.
+- Pressure should act as local decongestion, not primary steering; flow-to-center should stay dominant.
+
+### How to test
+1. Enter Play Mode with high unit counts.
+2. Verify units still spread under congestion but overall trajectories remain center-seeking and natural.
+3. Confirm no long straight "force-field" lanes are formed in open areas.
+4. Profile and confirm `GC Alloc` remains `0 B`.
