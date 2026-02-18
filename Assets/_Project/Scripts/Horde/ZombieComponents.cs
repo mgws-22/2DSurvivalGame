@@ -32,4 +32,12 @@ namespace Project.Horde
         public uint LastSeed;
         public float SpawnAccumulator;
     }
+
+    public struct HordeSeparationConfig : IComponentData
+    {
+        public float Radius;
+        public float SeparationStrength;
+        public float MaxPushPerFrame;
+        public int Iterations;
+    }
 }

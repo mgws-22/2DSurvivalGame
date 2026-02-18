@@ -344,3 +344,27 @@
 1. Recompile and enter Play Mode.
 2. Confirm no baking error about duplicate `SpriteRenderer`.
 3. Toggle/disable object with `FlowFieldGizmosDrawer` and confirm no teardown exception appears.
+
+## 2026-02-18 - No-overlap horde separation (ECS spatial hash, no physics)
+
+### What changed
+- Added separation config component:
+  - `Assets/_Project/Scripts/Horde/ZombieComponents.cs`
+  - `HordeSeparationConfig` with defaults (`radius=0.25`, `strength=0.7`, `maxPush=0.15`, `iterations=1`)
+- Added separation runtime system:
+  - `Assets/_Project/Scripts/Horde/HordeSeparationSystem.cs`
+  - runs after `ZombieSteeringSystem`
+  - snapshots positions, builds spatial hash, resolves local overlaps, writes corrected transforms
+- Added docs:
+  - `Docs/Systems/Horde/HordeSeparation.md`
+  - `Docs/Architecture/Index.md` link
+
+### Why
+- Needed scalable no-overlap behavior for 20k+ zombies without Unity Physics.
+- Avoided `O(N^2)` by using neighbor lookups in a uniform grid.
+
+### How to test
+1. Enter Play Mode and raise zombie count toward stress levels.
+2. Confirm zombies no longer stack on identical positions.
+3. Confirm player remains unaffected (separation applies only to `ZombieTag` query).
+4. Profile gameplay and verify `GC Alloc` stays `0 B`.
