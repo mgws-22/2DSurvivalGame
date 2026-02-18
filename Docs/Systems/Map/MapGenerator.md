@@ -111,3 +111,9 @@ This creates stripe/isoline-style corridors suitable for labyrinth layouts.
 - yellow wireframe = spawn bounds (outside play area)
 - cyan circles = gates on all sides
 6. Use component context menu `Regenerate Map` and verify deterministic output for fixed seed.
+
+## Flow Field Gizmos
+- Optional Scene View debug drawer:
+  - `Assets/_Project/Scripts/Map/Debug/FlowFieldGizmosDrawer.cs`
+- Add component to a scene object (recommended: `Map Generation`) to visualize flow arrows.
+- Supports toggles for draw enable, selected-only mode, sampling density, arrow scale, bounds, center area, and unreachable markers.

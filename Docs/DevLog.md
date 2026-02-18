@@ -250,3 +250,23 @@
 4. Verify zombies spawned outside map move to nearest gate and enter map.
 5. Verify in-map zombies follow corridors toward center-open area.
 6. Profile gameplay and confirm `GC Alloc` remains `0 B` in hot loop.
+
+## 2026-02-18 - Flow field Scene View gizmo drawer
+
+### What changed
+- Added editor-only flow field visualization component:
+  - `Assets/_Project/Scripts/Map/Debug/FlowFieldGizmosDrawer.cs`
+- Updated map system docs:
+  - `Docs/Systems/Map/MapGenerator.md`
+
+### Why
+- Needed fast visual verification of direction field output in Scene View.
+- Needed debugging toggles without touching runtime hot path for zombie steering.
+
+### How to test
+1. Add `FlowFieldGizmosDrawer` to `Map Generation` object.
+2. Enter Play Mode and regenerate map once so flow blob exists.
+3. Ensure Scene View Gizmos is enabled.
+4. Confirm arrows point toward center-open area.
+5. Change `sampleStep` and verify draw density changes clearly.
+6. Toggle `draw` off and confirm no flow gizmos are rendered.
