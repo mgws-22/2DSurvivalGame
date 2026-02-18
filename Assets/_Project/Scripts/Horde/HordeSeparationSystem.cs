@@ -16,6 +16,7 @@ namespace Project.Horde
         private NativeList<Entity> _entities;
         private NativeList<float2> _positionsA;
         private NativeList<float2> _positionsB;
+        private NativeList<float> _moveSpeeds;
         private NativeParallelMultiHashMap<int, int> _cellToIndex;
         private ComponentLookup<LocalTransform> _localTransformLookup;
 
@@ -23,11 +24,13 @@ namespace Project.Horde
         {
             _zombieQuery = state.GetEntityQuery(
                 ComponentType.ReadOnly<ZombieTag>(),
+                ComponentType.ReadOnly<ZombieMoveSpeed>(),
                 ComponentType.ReadWrite<LocalTransform>());
 
             _entities = new NativeList<Entity>(1024, Allocator.Persistent);
             _positionsA = new NativeList<float2>(1024, Allocator.Persistent);
             _positionsB = new NativeList<float2>(1024, Allocator.Persistent);
+            _moveSpeeds = new NativeList<float>(1024, Allocator.Persistent);
             _cellToIndex = new NativeParallelMultiHashMap<int, int>(4096, Allocator.Persistent);
             _localTransformLookup = state.GetComponentLookup<LocalTransform>(false);
 
@@ -40,13 +43,14 @@ namespace Project.Horde
                 Entity configEntity = state.EntityManager.CreateEntity(typeof(HordeSeparationConfig));
                 state.EntityManager.SetComponentData(configEntity, new HordeSeparationConfig
                 {
-                    Radius = 0.1f,
-                    CellSizeFactor = 1.25f,
-                    InfluenceRadiusFactor = 1.5f,
-                    SeparationStrength = 0.4f,
-                    MaxPushPerFrame = 0.9f,
-                    MaxNeighbors = 24,
+                    Radius = 0.12f,
+                    CellSizeFactor = 1.1f,
+                    InfluenceRadiusFactor = 2.4f,
+                    SeparationStrength = 1.0f,
+                    MaxPushPerFrame = 0.25f,
+                    MaxNeighbors = 40,
                     Iterations = 1
+
                 });
             }
         }
@@ -66,6 +70,11 @@ namespace Project.Horde
             if (_positionsB.IsCreated)
             {
                 _positionsB.Dispose();
+            }
+
+            if (_moveSpeeds.IsCreated)
+            {
+                _moveSpeeds.Dispose();
             }
 
             if (_cellToIndex.IsCreated)
@@ -100,6 +109,7 @@ namespace Project.Horde
             _entities.ResizeUninitialized(count);
             _positionsA.ResizeUninitialized(count);
             _positionsB.ResizeUninitialized(count);
+            _moveSpeeds.ResizeUninitialized(count);
 
             int requiredHashCapacity = math.max(1024, count * 12);
             if (_cellToIndex.Capacity < requiredHashCapacity)
@@ -110,7 +120,8 @@ namespace Project.Horde
             GatherZombieSnapshotJob gatherJob = new GatherZombieSnapshotJob
             {
                 Entities = _entities.AsArray(),
-                Positions = _positionsA.AsArray()
+                Positions = _positionsA.AsArray(),
+                MoveSpeeds = _moveSpeeds.AsArray()
             };
             state.Dependency = gatherJob.ScheduleParallel(state.Dependency);
 
@@ -140,7 +151,10 @@ namespace Project.Horde
                     InfluenceRadiusSq = influenceRadiusSq,
                     MaxPush = maxPush,
                     SeparationStrength = separationStrength,
-                    MaxNeighbors = maxNeighbors
+                    MaxNeighbors = maxNeighbors,
+                    MoveSpeeds = _moveSpeeds.AsArray(),
+                    DeltaTime = SystemAPI.Time.DeltaTime,
+                    Iterations = iterations
                 };
                 state.Dependency = separateJob.Schedule(count, 128, state.Dependency);
 
@@ -174,6 +188,11 @@ namespace Project.Horde
             {
                 _positionsB.Capacity = math.ceilpow2(count);
             }
+
+            if (_moveSpeeds.Capacity < count)
+            {
+                _moveSpeeds.Capacity = math.ceilpow2(count);
+            }
         }
 
         [BurstCompile]
@@ -181,11 +200,13 @@ namespace Project.Horde
         {
             [NativeDisableParallelForRestriction] public NativeArray<Entity> Entities;
             [NativeDisableParallelForRestriction] public NativeArray<float2> Positions;
+            [NativeDisableParallelForRestriction] public NativeArray<float> MoveSpeeds;
 
-            private void Execute(Entity entity, [EntityIndexInQuery] int index, in ZombieTag tag, in LocalTransform transform)
+            private void Execute(Entity entity, [EntityIndexInQuery] int index, in ZombieTag tag, in LocalTransform transform, in ZombieMoveSpeed moveSpeed)
             {
                 Entities[index] = entity;
                 Positions[index] = transform.Position.xy;
+                MoveSpeeds[index] = math.max(0f, moveSpeed.Value);
             }
         }
 
@@ -216,6 +237,9 @@ namespace Project.Horde
             public float MaxPush;
             public float SeparationStrength;
             public int MaxNeighbors;
+            [ReadOnly] public NativeArray<float> MoveSpeeds;
+            public float DeltaTime;
+            public int Iterations;
 
             public void Execute(int index)
             {
@@ -280,13 +304,18 @@ namespace Project.Horde
                 float corrLenSq = math.lengthsq(correction);
                 if (corrLenSq > 0.000001f)
                 {
-                    float maxPushSq = MaxPush * MaxPush;
-                    if (corrLenSq > maxPushSq)
+                    float2 softDelta = correction * SeparationStrength;
+                    float softLenSq = math.lengthsq(softDelta);
+                    float maxStepBySpeed = MoveSpeeds[index] * DeltaTime;
+                    float perIterationCap = maxStepBySpeed / math.max(1, Iterations);
+                    float effectiveMaxPush = math.min(MaxPush, perIterationCap);
+                    float maxPushSq = effectiveMaxPush * effectiveMaxPush;
+                    if (softLenSq > maxPushSq && softLenSq > 0.000001f)
                     {
-                        correction *= MaxPush * math.rsqrt(corrLenSq);
+                        softDelta *= effectiveMaxPush * math.rsqrt(softLenSq);
                     }
 
-                    pos += correction * SeparationStrength;
+                    pos += softDelta;
                 }
 
                 CorrectedPositions[index] = pos;

@@ -423,3 +423,43 @@
 1. Spawn dense zombie groups in narrow corridors.
 2. Verify zombies are repelled from walls and corrected out of blocked cells.
 3. Confirm no per-frame allocations in profiler (`GC Alloc` stays `0 B`).
+
+## 2026-02-18 - Speed cap tied to moveSpeed for soft crowd pushes
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordeSeparationSystem.cs`:
+  - zombie query now explicitly requires `ZombieMoveSpeed`.
+  - separation soft correction stays capped by `min(MaxPushPerFrame, moveSpeed * dt)` (per-iteration budget).
+- Updated `Assets/_Project/Scripts/Horde/WallRepulsionSystem.cs`:
+  - near-wall soft push now capped by `min(MaxWallPushPerFrame, moveSpeed * dt)`.
+  - blocked-cell projection fallback remains uncapped hard correction for wall safety.
+- Updated docs:
+  - `Docs/Systems/Horde/HordeSeparation.md`
+  - `Docs/Systems/Horde/WallRepulsion.md`
+
+### Why
+- Prevent effective movement speed spikes under dense separation/wall pressure while preserving the invariant that zombies cannot remain inside blocked tiles.
+
+### How to test
+1. Spawn dense clusters near walls/corridors.
+2. Verify no visible rocket-push bursts; movement remains bounded by normal move speed.
+3. Confirm zombies are still projected out immediately if they enter blocked cells.
+4. Profile gameplay: `GC Alloc` remains `0 B`.
+
+## 2026-02-18 - Wall corner stability fix (remove center-snap projection jumps)
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/WallRepulsionSystem.cs`:
+  - blocked-cell projection now snaps to the nearest point inside candidate walkable cells instead of always snapping to walkable cell centers.
+  - keeps existing hard safety behavior (still guarantees correction out of blocked cells), but reduces large correction distances in cliff corners.
+- Updated docs:
+  - `Docs/Systems/Horde/WallRepulsion.md`
+
+### Why
+- Corner/cliff pressure could trigger visible instant pushes when fallback projection chose a walkable cell center significantly away from the penetrated point.
+
+### How to test
+1. Drive dense zombie groups into cliff corners and narrow wall bends.
+2. Verify correction remains immediate but without large outward launch jumps.
+3. Confirm zombies still never remain inside blocked cells.
+4. Profile gameplay and confirm `GC Alloc` remains `0 B`.

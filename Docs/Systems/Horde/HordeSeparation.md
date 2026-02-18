@@ -17,7 +17,7 @@ Per frame:
 4. Early-cull neighbors outside `influenceRadius`.
 5. Accumulate separation correction when neighbor distance is below `minDist = 2*radius`.
 6. Stop processing neighbors when `maxNeighbors` is reached (bounded worst-case).
-7. Clamp correction by `maxPushPerFrame`.
+7. Clamp correction by `min(maxPushPerFrame, moveSpeed * dt)` (per iteration) so total soft push cannot exceed unit speed budget.
 8. Apply corrected positions.
 
 Optional second pass is supported via `Iterations` (clamped to `1..2`).
@@ -35,6 +35,7 @@ Optional second pass is supported via `Iterations` (clamped to `1..2`).
 - Only zombies are moved by separation.
 - No per-frame managed allocations.
 - No `O(N^2)` all-pairs scan.
+- Soft displacement from separation is tied to each zombie's `ZombieMoveSpeed`.
 
 ## Performance
 - Burst jobs for snapshot, grid build, separation, and writeback.

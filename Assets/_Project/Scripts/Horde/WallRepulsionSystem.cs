@@ -14,6 +14,7 @@ namespace Project.Horde
         public void OnCreate(ref SystemState state)
         {
             state.RequireForUpdate<ZombieTag>();
+            state.RequireForUpdate<ZombieMoveSpeed>();
             state.RequireForUpdate<MapRuntimeData>();
             state.RequireForUpdate<MapWalkableCell>();
             state.RequireForUpdate<WallFieldSingleton>();
@@ -24,8 +25,8 @@ namespace Project.Horde
                 Entity e = state.EntityManager.CreateEntity(typeof(WallRepulsionConfig));
                 state.EntityManager.SetComponentData(e, new WallRepulsionConfig
                 {
-                    UnitRadiusWorld = 0.05f,
-                    WallPushStrength = 1f,
+                    UnitRadiusWorld = 0.2f,
+                    WallPushStrength = 0.4f,
                     MaxWallPushPerFrame = 0.15f,
                     ProjectionSearchRadiusCells = 1
                 });
@@ -52,7 +53,8 @@ namespace Project.Horde
                 UnitRadius = math.max(0.001f, config.UnitRadiusWorld),
                 WallPushStrength = math.max(0f, config.WallPushStrength),
                 MaxPush = math.max(0f, config.MaxWallPushPerFrame),
-                ProjectionRadius = math.clamp(config.ProjectionSearchRadiusCells, 1, 2)
+                ProjectionRadius = math.clamp(config.ProjectionSearchRadiusCells, 1, 2),
+                DeltaTime = SystemAPI.Time.DeltaTime
             };
 
             state.Dependency = job.ScheduleParallel(state.Dependency);
@@ -61,6 +63,8 @@ namespace Project.Horde
         [BurstCompile]
         private partial struct WallRepulsionJob : IJobEntity
         {
+            private const float ProjectionInsetFactor = 0.001f;
+
             public MapRuntimeData Map;
             [ReadOnly] public NativeArray<MapWalkableCell> Walkable;
             [ReadOnly] public BlobAssetReference<WallFieldBlob> Wall;
@@ -68,8 +72,9 @@ namespace Project.Horde
             public float WallPushStrength;
             public float MaxPush;
             public int ProjectionRadius;
+            public float DeltaTime;
 
-            private void Execute(ref LocalTransform transform, in ZombieTag tag)
+            private void Execute(ref LocalTransform transform, in ZombieTag tag, in ZombieMoveSpeed moveSpeed)
             {
                 float2 pos = transform.Position.xy;
                 int2 cell = Map.WorldToGrid(pos);
@@ -105,7 +110,9 @@ namespace Project.Horde
                     {
                         float2 n = wall.DirLut[dir];
                         float push = (UnitRadius - d) * WallPushStrength;
-                        push = math.min(push, MaxPush);
+                        float maxStepBySpeed = math.max(0f, moveSpeed.Value) * DeltaTime;
+                        float effectiveMaxPush = math.min(MaxPush, maxStepBySpeed);
+                        push = math.min(push, effectiveMaxPush);
                         pos += n * push;
                     }
                 }
@@ -153,12 +160,12 @@ namespace Project.Horde
                                 continue;
                             }
 
-                            float2 center = Map.Origin + ((new float2(c.x + 0.5f, c.y + 0.5f)) * Map.TileSize);
-                            float d2 = math.lengthsq(center - currentPos);
+                            float2 candidate = ClosestPointInsideCell(c, currentPos);
+                            float d2 = math.lengthsq(candidate - currentPos);
                             if (d2 < bestDistSq)
                             {
                                 bestDistSq = d2;
-                                best = center;
+                                best = candidate;
                                 found = true;
                             }
                         }
@@ -171,6 +178,17 @@ namespace Project.Horde
                 }
 
                 return best;
+            }
+
+            private float2 ClosestPointInsideCell(int2 cell, float2 worldPos)
+            {
+                float tileSize = Map.TileSize;
+                float2 min = Map.Origin + (new float2(cell.x, cell.y) * tileSize);
+                float2 max = min + new float2(tileSize, tileSize);
+                float inset = math.max(0.0001f, tileSize * ProjectionInsetFactor);
+                float2 minInset = min + inset;
+                float2 maxInset = max - inset;
+                return math.clamp(worldPos, minInset, maxInset);
             }
         }
     }
