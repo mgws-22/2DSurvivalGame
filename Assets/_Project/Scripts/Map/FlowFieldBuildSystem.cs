@@ -189,7 +189,7 @@ namespace Project.Map
                 state.EntityManager.RemoveComponent<FlowFieldDirtyTag>(mapEntity);
 
                 double buildMs = (Time.realtimeSinceStartupAsDouble - buildStart) * 1000.0;
-                Debug.Log($"FlowField built {map.Width}x{map.Height} in {buildMs:F2} ms. Reachable={reachableCount} Gates={gateCount}");
+                UnityEngine.Debug.Log($"FlowField built {map.Width}x{map.Height} in {buildMs:F2} ms. Reachable={reachableCount} Gates={gateCount}");
             }
             finally
             {
