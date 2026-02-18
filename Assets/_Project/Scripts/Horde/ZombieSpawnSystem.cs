@@ -2,9 +2,6 @@ using Project.Map;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Transforms;
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-using UnityEngine;
-#endif
 
 namespace Project.Horde
 {
@@ -13,11 +10,6 @@ namespace Project.Horde
     {
         private EntityQuery _zombieQuery;
         private EntityQuery _spawnStateQuery;
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-        private static bool s_loggedSpawnDiagnostics;
-        private static bool s_loggedFirstSpawnBatch;
-        private static int s_spawnDiagnosticsFrameCount;
-#endif
 
         public void OnCreate(ref SystemState state)
         {
@@ -34,52 +26,9 @@ namespace Project.Horde
             int aliveCountBeforeSpawn = _zombieQuery.CalculateEntityCount();
 
             bool prefabEntityValid = false;
-            bool prefabHasZombieTag = false;
-            bool prefabHasPrefabTag = false;
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-            bool prefabHasSpriteRenderer = false;
-            float prefabScale = 0f;
-#endif
             if (hasConfig && config.Prefab != Entity.Null && entityManager.Exists(config.Prefab))
             {
-                prefabHasZombieTag = entityManager.HasComponent<ZombieTag>(config.Prefab);
-                prefabHasPrefabTag = entityManager.HasComponent<Prefab>(config.Prefab);
-                prefabEntityValid = prefabHasPrefabTag;
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-                prefabHasSpriteRenderer = entityManager.HasComponent<SpriteRenderer>(config.Prefab);
-                if (entityManager.HasComponent<LocalTransform>(config.Prefab))
-                {
-                    prefabScale = entityManager.GetComponentData<LocalTransform>(config.Prefab).Scale;
-                }
-#endif
-            }
-
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-            s_spawnDiagnosticsFrameCount++;
-            bool shouldLogDiagnostics =
-                prefabEntityValid ||
-                !hasConfig ||
-                !hasMap ||
-                s_spawnDiagnosticsFrameCount >= 120;
-#else
-            const bool shouldLogDiagnostics = true;
-#endif
-            if (shouldLogDiagnostics)
-            {
-                LogSpawnDiagnosticsOnce(
-                    hasConfig,
-                    hasMap,
-                    config,
-                    mapData,
-                    config.Prefab != Entity.Null,
-                    prefabEntityValid,
-                    prefabHasZombieTag,
-                    prefabHasPrefabTag,
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-                    prefabHasSpriteRenderer,
-                    prefabScale,
-#endif
-                    aliveCountBeforeSpawn);
+                prefabEntityValid = entityManager.HasComponent<Prefab>(config.Prefab);
             }
 
             if (!hasConfig || !hasMap || !prefabEntityValid)
@@ -151,94 +100,18 @@ namespace Project.Horde
                 ? entityManager.GetComponentData<LocalTransform>(config.Prefab)
                 : LocalTransform.FromPositionRotationScale(float3.zero, quaternion.identity, 1f);
             Unity.Mathematics.Random random = stateData.Random;
-            float3 firstSpawnPosition = float3.zero;
-            bool capturedFirstSpawn = false;
             for (int i = 0; i < spawnCount; i++)
             {
                 int2 spawnCell = SampleSpawnRingCell(ref random, mapData.Width, mapData.Height, mapData.SpawnMargin);
                 Entity entity = ecb.Instantiate(config.Prefab);
 
                 float3 position = mapData.GridToWorld(spawnCell, 0f);
-                if (!capturedFirstSpawn)
-                {
-                    firstSpawnPosition = position;
-                    capturedFirstSpawn = true;
-                }
                 LocalTransform transform = LocalTransform.FromPositionRotationScale(position, prefabTransform.Rotation, prefabTransform.Scale);
                 ecb.SetComponent(entity, transform);
             }
 
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-            LogFirstSpawnBatchOnce(spawnCount, firstSpawnPosition, mapData.CenterWorld);
-#endif
-
             stateData.Random = random;
             entityManager.SetComponentData(spawnStateEntity, stateData);
-        }
-
-        private static void LogSpawnDiagnosticsOnce(
-            bool hasConfig,
-            bool hasMap,
-            ZombieSpawnConfig config,
-            MapRuntimeData mapData,
-            bool prefabAssigned,
-            bool prefabEntityValid,
-            bool prefabHasZombieTag,
-            bool prefabHasPrefabTag,
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-            bool prefabHasSpriteRenderer,
-            float prefabScale,
-#endif
-            int zombieCountBeforeSpawn)
-        {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (s_loggedSpawnDiagnostics)
-            {
-                return;
-            }
-
-            s_loggedSpawnDiagnostics = true;
-
-            string mapSummary = hasMap
-                ? $"yes (w={mapData.Width}, h={mapData.Height}, margin={mapData.SpawnMargin})"
-                : "no";
-
-            string actionHint;
-            if (!hasConfig)
-            {
-                actionHint = "Missing ZombieSpawnConfig singleton. Add ZombieSpawnConfigAuthoring to an active scene object, or run Tools/Survival/Setup Zombie Demo Scene.";
-            }
-            else if (!prefabAssigned)
-            {
-                actionHint = "ZombieSpawnConfig exists, but Prefab is Entity.Null. Assign _zombiePrefab on ZombieSpawnConfigAuthoring (or run Tools/Survival/Setup Zombie Demo Scene). Runtime bridge retries and requests EntityPrefabReference load until a valid prefab entity is available.";
-            }
-            else if (!prefabEntityValid)
-            {
-                actionHint = "Prefab entity is invalid. Ensure assigned prefab has ZombieAuthoring and baking/runtime bridge can produce a Prefab-tagged entity.";
-            }
-            else if (!hasMap)
-            {
-                actionHint = "MapRuntimeData singleton is missing. Ensure map generation runs and MapEcsBridge sync succeeds.";
-            }
-            else
-            {
-                actionHint = "All required spawn prerequisites are present.";
-            }
-
-            Debug.Log(
-                "[ZombieSpawnSystem] Diagnostics (once)\n" +
-                $"- ZombieSpawnConfig singleton: {(hasConfig ? "yes" : "no")}\n" +
-                $"- Prefab assigned (Entity.Null?): {(prefabAssigned ? "yes" : "no")}\n" +
-                $"- Prefab entity valid: {(prefabEntityValid ? "yes" : "no")}\n" +
-                $"- Prefab has ZombieTag: {(prefabHasZombieTag ? "yes" : "no")}\n" +
-                $"- Prefab has Prefab tag: {(prefabHasPrefabTag ? "yes" : "no")}\n" +
-                $"- Prefab has SpriteRenderer companion: {(prefabHasSpriteRenderer ? "yes" : "no")}\n" +
-                $"- Prefab scale: {prefabScale}\n" +
-                $"- MapRuntimeData singleton: {mapSummary}\n" +
-                $"- spawnRate={config.SpawnRate}, spawnBatchSize={config.SpawnBatchSize}, maxAlive={config.MaxAlive}, seed={config.Seed}\n" +
-                $"- Zombie count before spawn: {zombieCountBeforeSpawn}\n" +
-                $"- Action: {actionHint}");
-#endif
         }
 
         private static Unity.Mathematics.Random CreateRandom(uint seed)
@@ -251,24 +124,6 @@ namespace Project.Horde
 
             return new Unity.Mathematics.Random(hashed);
         }
-
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-        private static void LogFirstSpawnBatchOnce(int spawnCount, float3 firstSpawnPosition, float2 centerWorld)
-        {
-            if (s_loggedFirstSpawnBatch)
-            {
-                return;
-            }
-
-            s_loggedFirstSpawnBatch = true;
-            float distanceToCenter = math.distance(firstSpawnPosition.xy, centerWorld);
-            Debug.Log(
-                "[ZombieSpawnSystem] First spawn batch (once)\n" +
-                $"- Spawned this update: {spawnCount}\n" +
-                $"- First spawn world position: ({firstSpawnPosition.x:F2}, {firstSpawnPosition.y:F2}, {firstSpawnPosition.z:F2})\n" +
-                $"- Distance from map center: {distanceToCenter:F2}");
-        }
-#endif
 
         private static int2 SampleSpawnRingCell(ref Unity.Mathematics.Random random, int width, int height, int spawnMargin)
         {

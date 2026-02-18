@@ -202,3 +202,20 @@
 2. Check one-time spawn diagnostics and confirm `Prefab has SpriteRenderer companion: yes`.
 3. Confirm zombie entity count increases over time in Entities Hierarchy.
 4. Confirm zombies are visible in Game view and keep moving toward map center.
+
+## 2026-02-17 - Cleanup: remove zombie spawn diagnostics/log noise
+
+### What changed
+- Removed one-time spawn diagnostics and first-spawn debug logs from:
+  - `Assets/_Project/Scripts/Horde/ZombieSpawnSystem.cs`
+- Removed runtime bridge warning logs from:
+  - `Assets/_Project/Scripts/Horde/ZombieSpawnConfigAuthoring.cs`
+
+### Why
+- System is now stable and the temporary diagnostics were no longer needed.
+- Keeps runtime/editor console clean without affecting spawn/steering behavior.
+
+### How to verify
+1. Enter Play Mode in `Assets/Scenes/SampleScene.unity`.
+2. Confirm zombies still spawn and move as before.
+3. Confirm zombie-related diagnostic spam is gone from Console.

@@ -129,10 +129,6 @@ namespace Project.Horde
 
     internal static class ZombieSpawnConfigRuntimeBridge
     {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-        private static bool s_loggedMissingPrefab;
-        private static bool s_loggedMissingZombieAuthoring;
-#endif
 #if UNITY_EDITOR
         private static Entity s_prefabLoadRequestEntity;
         private static EntityPrefabReference s_prefabLoadReference;
@@ -199,24 +195,6 @@ namespace Project.Horde
             if (!IsValidZombiePrefabEntity(entityManager, prefabEntity))
             {
                 prefabEntity = Entity.Null;
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-                if (authoring.ZombiePrefab == null)
-                {
-                    if (!s_loggedMissingPrefab)
-                    {
-                        s_loggedMissingPrefab = true;
-                        Debug.LogWarning("[ZombieSpawnConfigRuntimeBridge] Missing Zombie Prefab reference on ZombieSpawnConfigAuthoring.");
-                    }
-                }
-                else if (authoring.ZombiePrefab.GetComponent<ZombieAuthoring>() == null)
-                {
-                    if (!s_loggedMissingZombieAuthoring)
-                    {
-                        s_loggedMissingZombieAuthoring = true;
-                        Debug.LogWarning("[ZombieSpawnConfigRuntimeBridge] Assigned zombie prefab is missing ZombieAuthoring component.");
-                    }
-                }
-#endif
             }
 
             config.SpawnRate = math.max(0f, authoring.SpawnRate);
