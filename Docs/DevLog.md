@@ -296,3 +296,34 @@
 2. In Scene View with gizmos enabled, confirm flow arrows show many angles (not only N/E/S/W).
 3. Observe zombies in open areas move more naturally diagonally toward center.
 4. Confirm no GC alloc spikes in gameplay hot loop.
+
+## 2026-02-18 - Expanded flow field (map + spawn margin), gate-seeking removed
+
+### What changed
+- Reworked flow build to cover expanded grid including spawn margin:
+  - `Assets/_Project/Scripts/Map/FlowFieldBuildSystem.cs`
+  - expanded dimensions: `width + 2*spawnMargin`, `height + 2*spawnMargin`
+  - expanded origin: `mapOrigin - spawnMargin * tileSize`
+  - outside-map expanded cells are walkable
+- Removed gate-pathing ECS data from runtime bridge:
+  - `Assets/_Project/Scripts/Map/MapEcsBridge.cs`
+  - removed `GatePoint` buffer publishing
+- Removed gate-seeking runtime steering:
+  - `Assets/_Project/Scripts/Horde/ZombieSteeringSystem.cs`
+  - steering now uses expanded flow lookup everywhere; outside expanded bounds falls back to center seek
+- Removed `GatePoint` component type:
+  - `Assets/_Project/Scripts/Map/FlowFieldComponents.cs`
+- Updated docs:
+  - `Docs/Systems/Horde/FlowFieldPathfinding.md`
+  - `Docs/Systems/Horde/ZombieSteering.md`
+  - `Docs/Systems/Map/MapGenerator.md`
+
+### Why
+- Needed one global flow field from spawn ring to center, without special-case gate routing.
+- Keeps runtime lookup constant-time while avoiding stalls in outside-map spawn area.
+
+### How to test
+1. Enter Play Mode and regenerate map.
+2. Confirm flow gizmo bounds include spawn margin area.
+3. Spawn zombies in outer ring and verify they immediately follow flow inward without gate targeting.
+4. Confirm `GC Alloc` remains `0 B` in hot gameplay loop.

@@ -18,7 +18,6 @@ namespace Project.Horde
         {
             state.RequireForUpdate<MapRuntimeData>();
             state.RequireForUpdate<FlowFieldSingleton>();
-            state.RequireForUpdate<GatePoint>();
             state.RequireForUpdate<ZombieTag>();
         }
 
@@ -32,7 +31,6 @@ namespace Project.Horde
             }
 
             MapRuntimeData mapData = SystemAPI.GetSingleton<MapRuntimeData>();
-            DynamicBuffer<GatePoint> gates = SystemAPI.GetSingletonBuffer<GatePoint>(true);
             FlowFieldSingleton flowSingleton = SystemAPI.GetSingleton<FlowFieldSingleton>();
             if (!flowSingleton.Blob.IsCreated)
             {
@@ -43,7 +41,6 @@ namespace Project.Horde
             {
                 DeltaTime = deltaTime,
                 MapData = mapData,
-                Gates = gates.AsNativeArray(),
                 Flow = flowSingleton.Blob
             };
 
@@ -55,7 +52,6 @@ namespace Project.Horde
         {
             public float DeltaTime;
             public MapRuntimeData MapData;
-            [ReadOnly] public NativeArray<GatePoint> Gates;
             [ReadOnly] public BlobAssetReference<FlowFieldBlob> Flow;
 
             private void Execute(ref LocalTransform transform, ref ZombieSteeringState steeringState, in ZombieMoveSpeed moveSpeed, in ZombieTag tag)
@@ -87,14 +83,14 @@ namespace Project.Horde
 
             private float2 ResolveDesiredDirection(float2 position)
             {
-                int2 grid = MapData.WorldToGrid(position);
-                if (!MapData.IsInMap(grid))
+                ref FlowFieldBlob flow = ref Flow.Value;
+                int2 grid = WorldToFlowGrid(position, flow);
+                if (!IsInFlowBounds(grid, flow))
                 {
-                    return DirectionToNearestGate(position);
+                    return NormalizeFast(MapData.CenterWorld - position);
                 }
 
-                int flowIndex = MapData.ToIndex(grid);
-                ref FlowFieldBlob flow = ref Flow.Value;
+                int flowIndex = grid.x + (grid.y * flow.Width);
                 if (flowIndex < 0 || flowIndex >= flow.Dir.Length)
                 {
                     return NormalizeFast(MapData.CenterWorld - position);
@@ -111,14 +107,14 @@ namespace Project.Horde
 
             private bool IsWorldPositionWalkable(float2 worldPosition)
             {
-                int2 grid = MapData.WorldToGrid(worldPosition);
-                if (!MapData.IsInMap(grid))
+                ref FlowFieldBlob flow = ref Flow.Value;
+                int2 grid = WorldToFlowGrid(worldPosition, flow);
+                if (!IsInFlowBounds(grid, flow))
                 {
                     return true;
                 }
 
-                int index = MapData.ToIndex(grid);
-                ref FlowFieldBlob flow = ref Flow.Value;
+                int index = grid.x + (grid.y * flow.Width);
                 if (index < 0 || index >= flow.Dir.Length)
                 {
                     return false;
@@ -127,23 +123,15 @@ namespace Project.Horde
                 return flow.Dist[index] != ushort.MaxValue;
             }
 
-            private float2 DirectionToNearestGate(float2 position)
+            private static int2 WorldToFlowGrid(float2 world, ref FlowFieldBlob flow)
             {
-                float2 bestDelta = MapData.CenterWorld - position;
-                float bestLenSq = math.lengthsq(bestDelta);
+                float2 local = (world - flow.OriginWorld) / flow.CellSize;
+                return (int2)math.floor(local);
+            }
 
-                for (int i = 0; i < Gates.Length; i++)
-                {
-                    float2 delta = Gates[i].WorldPos - position;
-                    float lenSq = math.lengthsq(delta);
-                    if (lenSq < bestLenSq)
-                    {
-                        bestLenSq = lenSq;
-                        bestDelta = delta;
-                    }
-                }
-
-                return NormalizeFast(bestDelta);
+            private static bool IsInFlowBounds(int2 grid, ref FlowFieldBlob flow)
+            {
+                return grid.x >= 0 && grid.y >= 0 && grid.x < flow.Width && grid.y < flow.Height;
             }
 
             private static float2 NormalizeFast(float2 v)

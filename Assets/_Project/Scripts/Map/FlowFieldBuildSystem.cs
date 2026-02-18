@@ -16,14 +16,14 @@ namespace Project.Map
 
         private static readonly int2[] NeighborOffsets8 =
         {
-            new int2(0, 1),   // N
-            new int2(1, 1),   // NE
-            new int2(1, 0),   // E
-            new int2(1, -1),  // SE
-            new int2(0, -1),  // S
-            new int2(-1, -1), // SW
-            new int2(-1, 0),  // W
-            new int2(-1, 1)   // NW
+            new int2(0, 1),
+            new int2(1, 1),
+            new int2(1, 0),
+            new int2(1, -1),
+            new int2(0, -1),
+            new int2(-1, -1),
+            new int2(-1, 0),
+            new int2(-1, 1)
         };
 
         private static readonly float2[] NeighborDirs8 =
@@ -62,62 +62,78 @@ namespace Project.Map
             }
 
             MapRuntimeData map = state.EntityManager.GetComponentData<MapRuntimeData>(mapEntity);
-            DynamicBuffer<MapWalkableCell> walkableBuffer = state.EntityManager.GetBuffer<MapWalkableCell>(mapEntity);
-            int tileCount = map.Width * map.Height;
-            if (tileCount <= 0 || walkableBuffer.Length != tileCount)
+            DynamicBuffer<MapWalkableCell> mapWalkable = state.EntityManager.GetBuffer<MapWalkableCell>(mapEntity);
+            int mapTileCount = map.Width * map.Height;
+            if (mapTileCount <= 0 || mapWalkable.Length != mapTileCount)
             {
                 state.EntityManager.RemoveComponent<FlowFieldDirtyTag>(mapEntity);
                 return;
             }
 
-            int gateCount = 0;
-            if (state.EntityManager.HasBuffer<GatePoint>(mapEntity))
-            {
-                DynamicBuffer<GatePoint> gates = state.EntityManager.GetBuffer<GatePoint>(mapEntity);
-                gateCount = gates.Length;
-            }
+            int margin = math.max(0, map.SpawnMargin);
+            int expWidth = map.Width + (margin * 2);
+            int expHeight = map.Height + (margin * 2);
+            int expTileCount = expWidth * expHeight;
+            float2 expOrigin = map.Origin - (new float2(margin, margin) * map.TileSize);
 
             double buildStart = Time.realtimeSinceStartupAsDouble;
 
-            NativeArray<int> dist = new NativeArray<int>(tileCount, Allocator.Temp);
-            NativeArray<int> queue = new NativeArray<int>(tileCount, Allocator.Temp);
-            NativeArray<byte> dir = new NativeArray<byte>(tileCount, Allocator.Temp);
+            NativeArray<byte> expandedWalkable = new NativeArray<byte>(expTileCount, Allocator.Temp);
+            NativeArray<int> dist = new NativeArray<int>(expTileCount, Allocator.Temp);
+            NativeArray<int> queue = new NativeArray<int>(expTileCount, Allocator.Temp);
+            NativeArray<byte> dir = new NativeArray<byte>(expTileCount, Allocator.Temp);
             NativeArray<float2> dirLut = new NativeArray<float2>(QuantizedDirCount, Allocator.Temp);
+
             try
             {
                 BuildDirLut(dirLut);
 
-                for (int i = 0; i < tileCount; i++)
+                for (int y = 0; y < expHeight; y++)
                 {
-                    dist[i] = InfDistance;
-                    dir[i] = NoneDirection;
+                    int row = y * expWidth;
+                    int oy = y - margin;
+                    for (int x = 0; x < expWidth; x++)
+                    {
+                        int ox = x - margin;
+                        bool walkable = true;
+                        if (ox >= 0 && oy >= 0 && ox < map.Width && oy < map.Height)
+                        {
+                            walkable = mapWalkable[ox + (oy * map.Width)].IsWalkable;
+                        }
+
+                        int index = row + x;
+                        expandedWalkable[index] = walkable ? (byte)1 : (byte)0;
+                        dist[index] = InfDistance;
+                        dir[index] = NoneDirection;
+                    }
                 }
 
-                int2 center = map.WorldToGrid(map.CenterWorld);
+                int2 mapCenter = map.WorldToGrid(map.CenterWorld);
+                int2 expCenter = mapCenter + new int2(margin, margin);
                 int radius = math.max(0, map.CenterOpenRadius);
                 int radiusSq = radius * radius;
                 int head = 0;
                 int tail = 0;
 
-                int minY = math.max(0, center.y - radius);
-                int maxY = math.min(map.Height - 1, center.y + radius);
+                int minY = math.max(0, expCenter.y - radius);
+                int maxY = math.min(expHeight - 1, expCenter.y + radius);
                 for (int y = minY; y <= maxY; y++)
                 {
-                    int dy = y - center.y;
-                    int row = y * map.Width;
-                    int minX = math.max(0, center.x - radius);
-                    int maxX = math.min(map.Width - 1, center.x + radius);
+                    int dy = y - expCenter.y;
+                    int row = y * expWidth;
+                    int minX = math.max(0, expCenter.x - radius);
+                    int maxX = math.min(expWidth - 1, expCenter.x + radius);
 
                     for (int x = minX; x <= maxX; x++)
                     {
-                        int dx = x - center.x;
+                        int dx = x - expCenter.x;
                         if ((dx * dx) + (dy * dy) > radiusSq)
                         {
                             continue;
                         }
 
                         int index = row + x;
-                        if (!walkableBuffer[index].IsWalkable || dist[index] == 0)
+                        if (expandedWalkable[index] == 0 || dist[index] == 0)
                         {
                             continue;
                         }
@@ -129,22 +145,26 @@ namespace Project.Map
 
                 if (tail == 0)
                 {
-                    int fallback = map.ToIndex(new int2(math.clamp(center.x, 0, map.Width - 1), math.clamp(center.y, 0, map.Height - 1)));
-                    if (walkableBuffer[fallback].IsWalkable)
+                    int cx = math.clamp(expCenter.x, 0, expWidth - 1);
+                    int cy = math.clamp(expCenter.y, 0, expHeight - 1);
+                    int fallback = cx + (cy * expWidth);
+                    if (expandedWalkable[fallback] != 0)
                     {
                         dist[fallback] = 0;
                         queue[tail++] = fallback;
                     }
                     else
                     {
-                        for (int i = 0; i < tileCount; i++)
+                        for (int i = 0; i < expTileCount; i++)
                         {
-                            if (walkableBuffer[i].IsWalkable)
+                            if (expandedWalkable[i] == 0)
                             {
-                                dist[i] = 0;
-                                queue[tail++] = i;
-                                break;
+                                continue;
                             }
+
+                            dist[i] = 0;
+                            queue[tail++] = i;
+                            break;
                         }
                     }
                 }
@@ -152,24 +172,24 @@ namespace Project.Map
                 while (head < tail)
                 {
                     int currentIndex = queue[head++];
-                    int y = currentIndex / map.Width;
-                    int x = currentIndex - (y * map.Width);
+                    int y = currentIndex / expWidth;
+                    int x = currentIndex - (y * expWidth);
                     int nextDistance = dist[currentIndex] + 1;
 
-                    VisitNeighbor(x, y + 1, nextDistance, map.Width, map.Height, walkableBuffer, dist, queue, ref tail);
-                    VisitNeighbor(x + 1, y, nextDistance, map.Width, map.Height, walkableBuffer, dist, queue, ref tail);
-                    VisitNeighbor(x, y - 1, nextDistance, map.Width, map.Height, walkableBuffer, dist, queue, ref tail);
-                    VisitNeighbor(x - 1, y, nextDistance, map.Width, map.Height, walkableBuffer, dist, queue, ref tail);
+                    VisitNeighbor(x, y + 1, nextDistance, expWidth, expHeight, expandedWalkable, dist, queue, ref tail);
+                    VisitNeighbor(x + 1, y, nextDistance, expWidth, expHeight, expandedWalkable, dist, queue, ref tail);
+                    VisitNeighbor(x, y - 1, nextDistance, expWidth, expHeight, expandedWalkable, dist, queue, ref tail);
+                    VisitNeighbor(x - 1, y, nextDistance, expWidth, expHeight, expandedWalkable, dist, queue, ref tail);
                 }
 
                 int reachableCount = 0;
-                for (int y = 0; y < map.Height; y++)
+                for (int y = 0; y < expHeight; y++)
                 {
-                    int row = y * map.Width;
-                    for (int x = 0; x < map.Width; x++)
+                    int row = y * expWidth;
+                    for (int x = 0; x < expWidth; x++)
                     {
                         int index = row + x;
-                        if (!walkableBuffer[index].IsWalkable || dist[index] == InfDistance)
+                        if (expandedWalkable[index] == 0 || dist[index] == InfDistance)
                         {
                             dir[index] = NoneDirection;
                             continue;
@@ -177,27 +197,43 @@ namespace Project.Map
 
                         reachableCount++;
                         int currentDistance = dist[index];
-                        float2 acc = float2.zero;
 
+                        if (currentDistance == 0)
+                        {
+                            float2 toCenter = new float2(expCenter.x - x, expCenter.y - y);
+                            if (math.lengthsq(toCenter) <= 0.000001f)
+                            {
+                                dir[index] = 0;
+                            }
+                            else
+                            {
+                                float2 v0 = toCenter * math.rsqrt(math.lengthsq(toCenter));
+                                dir[index] = QuantizeDirection(v0, dirLut);
+                            }
+
+                            continue;
+                        }
+
+                        float2 acc = float2.zero;
                         for (int n = 0; n < NeighborOffsets8.Length; n++)
                         {
                             int2 offset = NeighborOffsets8[n];
                             int nx = x + offset.x;
                             int ny = y + offset.y;
-                            if (nx < 0 || ny < 0 || nx >= map.Width || ny >= map.Height)
+                            if (nx < 0 || ny < 0 || nx >= expWidth || ny >= expHeight)
                             {
                                 continue;
                             }
 
                             if (offset.x != 0 && offset.y != 0 &&
-                                (!IsWalkable(x + offset.x, y, map.Width, map.Height, walkableBuffer) ||
-                                 !IsWalkable(x, y + offset.y, map.Width, map.Height, walkableBuffer)))
+                                (!IsWalkableExpanded(x + offset.x, y, expWidth, expHeight, expandedWalkable) ||
+                                 !IsWalkableExpanded(x, y + offset.y, expWidth, expHeight, expandedWalkable)))
                             {
                                 continue;
                             }
 
-                            int nIndex = nx + (ny * map.Width);
-                            if (!walkableBuffer[nIndex].IsWalkable)
+                            int nIndex = nx + (ny * expWidth);
+                            if (expandedWalkable[nIndex] == 0)
                             {
                                 continue;
                             }
@@ -215,52 +251,56 @@ namespace Project.Map
                         if (math.lengthsq(acc) <= 0.000001f)
                         {
                             float2 fallbackDir = float2.zero;
-                            int bestDelta = 0;
+                            int bestDistance = currentDistance;
 
                             for (int n = 0; n < NeighborOffsets8.Length; n++)
                             {
                                 int2 offset = NeighborOffsets8[n];
                                 int nx = x + offset.x;
                                 int ny = y + offset.y;
-                                if (nx < 0 || ny < 0 || nx >= map.Width || ny >= map.Height)
+                                if (nx < 0 || ny < 0 || nx >= expWidth || ny >= expHeight)
                                 {
                                     continue;
                                 }
 
                                 if (offset.x != 0 && offset.y != 0 &&
-                                    (!IsWalkable(x + offset.x, y, map.Width, map.Height, walkableBuffer) ||
-                                     !IsWalkable(x, y + offset.y, map.Width, map.Height, walkableBuffer)))
+                                    (!IsWalkableExpanded(x + offset.x, y, expWidth, expHeight, expandedWalkable) ||
+                                     !IsWalkableExpanded(x, y + offset.y, expWidth, expHeight, expandedWalkable)))
                                 {
                                     continue;
                                 }
 
-                                int nIndex = nx + (ny * map.Width);
-                                if (!walkableBuffer[nIndex].IsWalkable)
+                                int nIndex = nx + (ny * expWidth);
+                                if (expandedWalkable[nIndex] == 0)
                                 {
                                     continue;
                                 }
 
                                 int nDistance = dist[nIndex];
-                                if (nDistance == InfDistance || nDistance >= currentDistance)
+                                if (nDistance < bestDistance)
                                 {
-                                    continue;
-                                }
-
-                                int delta = currentDistance - nDistance;
-                                if (delta > bestDelta)
-                                {
-                                    bestDelta = delta;
+                                    bestDistance = nDistance;
                                     fallbackDir = NeighborDirs8[n];
                                 }
                             }
 
-                            if (bestDelta <= 0)
+                            if (bestDistance < currentDistance)
                             {
-                                dir[index] = NoneDirection;
+                                dir[index] = QuantizeDirection(fallbackDir, dirLut);
                                 continue;
                             }
 
-                            dir[index] = QuantizeDirection(fallbackDir, dirLut);
+                            float2 toCenter = new float2(expCenter.x - x, expCenter.y - y);
+                            if (math.lengthsq(toCenter) <= 0.000001f)
+                            {
+                                dir[index] = 0;
+                            }
+                            else
+                            {
+                                float2 vc = toCenter * math.rsqrt(math.lengthsq(toCenter));
+                                dir[index] = QuantizeDirection(vc, dirLut);
+                            }
+
                             continue;
                         }
 
@@ -271,20 +311,22 @@ namespace Project.Map
 
                 BlobBuilder builder = new BlobBuilder(Allocator.Temp);
                 ref FlowFieldBlob root = ref builder.ConstructRoot<FlowFieldBlob>();
-                root.Width = map.Width;
-                root.Height = map.Height;
+                root.Width = expWidth;
+                root.Height = expHeight;
                 root.DirCount = QuantizedDirCount;
                 root.CellSize = map.TileSize;
-                root.OriginWorld = map.Origin;
+                root.OriginWorld = expOrigin;
 
-                BlobBuilderArray<byte> dirBlob = builder.Allocate(ref root.Dir, tileCount);
-                BlobBuilderArray<ushort> distBlob = builder.Allocate(ref root.Dist, tileCount);
+                BlobBuilderArray<byte> dirBlob = builder.Allocate(ref root.Dir, expTileCount);
+                BlobBuilderArray<ushort> distBlob = builder.Allocate(ref root.Dist, expTileCount);
                 BlobBuilderArray<float2> lutBlob = builder.Allocate(ref root.DirLut, QuantizedDirCount);
-                for (int i = 0; i < tileCount; i++)
+
+                for (int i = 0; i < expTileCount; i++)
                 {
                     dirBlob[i] = dir[i];
                     distBlob[i] = dist[i] == InfDistance ? ushort.MaxValue : (ushort)math.min(ushort.MaxValue, dist[i]);
                 }
+
                 for (int i = 0; i < QuantizedDirCount; i++)
                 {
                     lutBlob[i] = dirLut[i];
@@ -305,10 +347,15 @@ namespace Project.Map
                 state.EntityManager.RemoveComponent<FlowFieldDirtyTag>(mapEntity);
 
                 double buildMs = (Time.realtimeSinceStartupAsDouble - buildStart) * 1000.0;
-                UnityEngine.Debug.Log($"FlowField built {map.Width}x{map.Height} in {buildMs:F2} ms. Reachable={reachableCount} Gates={gateCount}");
+                UnityEngine.Debug.Log($"FlowField built {expWidth}x{expHeight} in {buildMs:F2} ms. Reachable={reachableCount}");
             }
             finally
             {
+                if (expandedWalkable.IsCreated)
+                {
+                    expandedWalkable.Dispose();
+                }
+
                 if (dist.IsCreated)
                 {
                     dist.Dispose();
@@ -355,7 +402,7 @@ namespace Project.Map
             int nextDistance,
             int width,
             int height,
-            DynamicBuffer<MapWalkableCell> walkable,
+            NativeArray<byte> walkable,
             NativeArray<int> dist,
             NativeArray<int> queue,
             ref int tail)
@@ -366,7 +413,7 @@ namespace Project.Map
             }
 
             int index = x + (y * width);
-            if (!walkable[index].IsWalkable || nextDistance >= dist[index])
+            if (walkable[index] == 0 || nextDistance >= dist[index])
             {
                 return;
             }
@@ -375,14 +422,14 @@ namespace Project.Map
             queue[tail++] = index;
         }
 
-        private static bool IsWalkable(int x, int y, int width, int height, DynamicBuffer<MapWalkableCell> walkable)
+        private static bool IsWalkableExpanded(int x, int y, int width, int height, NativeArray<byte> walkable)
         {
             if (x < 0 || y < 0 || x >= width || y >= height)
             {
                 return false;
             }
 
-            return walkable[x + (y * width)].IsWalkable;
+            return walkable[x + (y * width)] != 0;
         }
 
         private static void BuildDirLut(NativeArray<float2> lut)

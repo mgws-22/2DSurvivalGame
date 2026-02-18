@@ -4,23 +4,24 @@
 Precompute global navigation once per map regenerate, then steer each zombie in `O(1)` using a byte direction lookup.
 
 ## Data
-- `MapRuntimeData`, `MapWalkableCell`, `GatePoint` (`Assets/_Project/Scripts/Map/MapEcsBridge.cs`, `Assets/_Project/Scripts/Map/FlowFieldComponents.cs`)
+- `MapRuntimeData`, `MapWalkableCell` (`Assets/_Project/Scripts/Map/MapEcsBridge.cs`)
 - `FlowFieldSingleton` with `BlobAssetReference<FlowFieldBlob>` (`Assets/_Project/Scripts/Map/FlowFieldComponents.cs`)
 - `FlowFieldDirtyTag` to trigger rebuild once per map sync (`Assets/_Project/Scripts/Map/FlowFieldComponents.cs`)
 
 ## Build Pipeline
 `FlowFieldBuildSystem` (`Assets/_Project/Scripts/Map/FlowFieldBuildSystem.cs`) runs only when `FlowFieldDirtyTag` exists:
 1. Collect center goal cells (walkable cells inside center-open radius).
-2. Run 4-neighbor BFS integration field (`dist`).
-3. Derive smooth direction by blending improving neighbors (8-neighbor gradient with corner-cutting).
-4. Quantize normalized direction to 32 directions (`byte` index) and bake LUT in blob.
-5. Bake `dir` + debug `dist` into persistent blob.
-6. Replace old blob, remove dirty tag.
+2. Build expanded grid (`map + spawn margin`) where outside-map cells are walkable.
+3. Run 4-neighbor BFS integration field (`dist`) on expanded grid.
+4. Derive smooth direction by blending improving neighbors (8-neighbor gradient with corner-cutting).
+5. Quantize normalized direction to 32 directions (`byte` index) and bake LUT in blob.
+6. Bake `dir` + debug `dist` into persistent blob.
+7. Replace old blob, remove dirty tag.
 
 ## Runtime Steering Contract
 `ZombieSteeringSystem` consumes the blob:
-- Outside map bounds: steer toward nearest gate world position.
-- Inside map bounds: read `dir[cellIndex]` and fetch unit vector from blob LUT (`DirLut[dir]`).
+- Read expanded-grid `dir[cellIndex]` and fetch unit vector from blob LUT (`DirLut[dir]`).
+- If outside expanded grid: fallback to center seek.
 - Fallback (`255` or invalid): seek center.
 
 ## Invariants

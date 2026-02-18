@@ -66,7 +66,7 @@ namespace Project.Map
             Entity mapEntity;
             if (query.IsEmptyIgnoreFilter)
             {
-                mapEntity = entityManager.CreateEntity(typeof(MapRuntimeData), typeof(MapWalkableCell), typeof(GatePoint));
+                mapEntity = entityManager.CreateEntity(typeof(MapRuntimeData), typeof(MapWalkableCell));
             }
             else
             {
@@ -74,11 +74,6 @@ namespace Project.Map
             }
 
             query.Dispose();
-
-            if (!entityManager.HasComponent<GatePoint>(mapEntity))
-            {
-                entityManager.AddBuffer<GatePoint>(mapEntity);
-            }
 
             float2 centerWorld = mapData.WorldOrigin +
                 (new float2(mapData.Width * mapData.TileSize, mapData.Height * mapData.TileSize) * 0.5f);
@@ -106,16 +101,6 @@ namespace Project.Map
                 walkable[i] = new MapWalkableCell
                 {
                     Value = mapData.IsWalkable(grid.x, grid.y) ? (byte)1 : (byte)0
-                };
-            }
-
-            DynamicBuffer<GatePoint> gates = entityManager.GetBuffer<GatePoint>(mapEntity);
-            gates.ResizeUninitialized(mapData.GateCount);
-            for (int i = 0; i < mapData.GateCount; i++)
-            {
-                gates[i] = new GatePoint
-                {
-                    WorldPos = mapData.GridToWorld(mapData.GetGateCenter(i))
                 };
             }
 

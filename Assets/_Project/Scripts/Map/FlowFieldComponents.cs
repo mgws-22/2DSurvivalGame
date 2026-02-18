@@ -24,9 +24,4 @@ namespace Project.Map
     public struct FlowFieldDirtyTag : IComponentData
     {
     }
-
-    public struct GatePoint : IBufferElementData
-    {
-        public float2 WorldPos;
-    }
 }
