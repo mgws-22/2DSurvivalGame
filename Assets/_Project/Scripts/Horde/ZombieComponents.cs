@@ -43,4 +43,12 @@ namespace Project.Horde
         public int MaxNeighbors;
         public int Iterations;
     }
+
+    public struct WallRepulsionConfig : IComponentData
+    {
+        public float UnitRadiusWorld;
+        public float WallPushStrength;
+        public float MaxWallPushPerFrame;
+        public int ProjectionSearchRadiusCells;
+    }
 }

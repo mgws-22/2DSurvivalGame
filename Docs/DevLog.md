@@ -395,3 +395,31 @@
 2. Verify frame-time spikes are reduced versus uncapped separation.
 3. Confirm overlap reduction remains acceptable under heavy load.
 4. Confirm `GC Alloc` remains `0 B` in gameplay.
+
+## 2026-02-18 - WallField + wall repulsion safety net
+
+### What changed
+- Added wall field ECS data + dirty tag:
+  - `Assets/_Project/Scripts/Map/WallFieldComponents.cs`
+- Added wall field build system:
+  - `Assets/_Project/Scripts/Map/WallFieldBuildSystem.cs`
+  - computes wall distance + quantized outward normal per cell
+- Hooked map sync to trigger wall field rebuild:
+  - `Assets/_Project/Scripts/Map/MapEcsBridge.cs`
+- Added runtime wall repulsion/correction:
+  - `Assets/_Project/Scripts/Horde/WallRepulsionSystem.cs`
+  - includes blocked-cell projection fallback
+- Added config:
+  - `Assets/_Project/Scripts/Horde/ZombieComponents.cs` (`WallRepulsionConfig`)
+- Added docs:
+  - `Docs/Systems/Horde/WallRepulsion.md`
+  - `Docs/Architecture/Index.md`
+
+### Why
+- Crowd pressure could force zombies into blocked tiles without a wall-aware correction step.
+- Needed cheap O(1) wall avoidance per zombie and robust fallback when overlap pressure is extreme.
+
+### How to test
+1. Spawn dense zombie groups in narrow corridors.
+2. Verify zombies are repelled from walls and corrected out of blocked cells.
+3. Confirm no per-frame allocations in profiler (`GC Alloc` stays `0 B`).

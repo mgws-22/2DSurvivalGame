@@ -109,6 +109,11 @@ namespace Project.Map
                 entityManager.AddComponent<FlowFieldDirtyTag>(mapEntity);
             }
 
+            if (!entityManager.HasComponent<WallFieldDirtyTag>(mapEntity))
+            {
+                entityManager.AddComponent<WallFieldDirtyTag>(mapEntity);
+            }
+
             return true;
         }
     }

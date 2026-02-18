@@ -5,6 +5,7 @@
 - [ZombieSpawnSystem](../Systems/Horde/ZombieSpawnSystem.md)
 - [ZombieSteeringSystem](../Systems/Horde/ZombieSteering.md)
 - [HordeSeparationSystem](../Systems/Horde/HordeSeparation.md)
+- [WallRepulsionSystem](../Systems/Horde/WallRepulsion.md)
 - [Flow Field Pathfinding (Plan A)](../Systems/Horde/FlowFieldPathfinding.md)
 
 ## Build/Compilation

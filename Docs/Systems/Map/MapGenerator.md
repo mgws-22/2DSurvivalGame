@@ -92,6 +92,7 @@ This creates stripe/isoline-style corridors suitable for labyrinth layouts.
   - `MapRuntimeData` singleton: width/height/tileSize/origin/spawnMargin/center
   - `MapWalkableCell` dynamic buffer: dense walkability grid (`0/1`)
   - `FlowFieldDirtyTag`: triggers single rebuild of flow field for the new map
+  - `WallFieldDirtyTag`: triggers single rebuild of wall distance/normal field for the new map
 - This enables Burst ECS systems to query map walkability without managed `MapData` access.
 
 ## Performance Notes
