@@ -11,6 +11,32 @@ namespace Project.Map
     {
         private const int InfDistance = int.MaxValue;
         private const byte NoneDirection = 255;
+        private const int QuantizedDirCount = 32;
+        private const float Diagonal = 0.70710677f;
+
+        private static readonly int2[] NeighborOffsets8 =
+        {
+            new int2(0, 1),   // N
+            new int2(1, 1),   // NE
+            new int2(1, 0),   // E
+            new int2(1, -1),  // SE
+            new int2(0, -1),  // S
+            new int2(-1, -1), // SW
+            new int2(-1, 0),  // W
+            new int2(-1, 1)   // NW
+        };
+
+        private static readonly float2[] NeighborDirs8 =
+        {
+            new float2(0f, 1f),
+            new float2(Diagonal, Diagonal),
+            new float2(1f, 0f),
+            new float2(Diagonal, -Diagonal),
+            new float2(0f, -1f),
+            new float2(-Diagonal, -Diagonal),
+            new float2(-1f, 0f),
+            new float2(-Diagonal, Diagonal)
+        };
 
         public void OnCreate(ref SystemState state)
         {
@@ -56,8 +82,11 @@ namespace Project.Map
             NativeArray<int> dist = new NativeArray<int>(tileCount, Allocator.Temp);
             NativeArray<int> queue = new NativeArray<int>(tileCount, Allocator.Temp);
             NativeArray<byte> dir = new NativeArray<byte>(tileCount, Allocator.Temp);
+            NativeArray<float2> dirLut = new NativeArray<float2>(QuantizedDirCount, Allocator.Temp);
             try
             {
+                BuildDirLut(dirLut);
+
                 for (int i = 0; i < tileCount; i++)
                 {
                     dist[i] = InfDistance;
@@ -147,15 +176,50 @@ namespace Project.Map
                         }
 
                         reachableCount++;
-                        int bestDistance = dist[index];
-                        byte bestDir = NoneDirection;
+                        int currentDistance = dist[index];
+                        float2 acc = float2.zero;
 
-                        TryBestNeighbor(x, y + 1, 0, bestDistance, map.Width, map.Height, dist, ref bestDistance, ref bestDir);
-                        TryBestNeighbor(x + 1, y, 1, bestDistance, map.Width, map.Height, dist, ref bestDistance, ref bestDir);
-                        TryBestNeighbor(x, y - 1, 2, bestDistance, map.Width, map.Height, dist, ref bestDistance, ref bestDir);
-                        TryBestNeighbor(x - 1, y, 3, bestDistance, map.Width, map.Height, dist, ref bestDistance, ref bestDir);
+                        for (int n = 0; n < NeighborOffsets8.Length; n++)
+                        {
+                            int2 offset = NeighborOffsets8[n];
+                            int nx = x + offset.x;
+                            int ny = y + offset.y;
+                            if (nx < 0 || ny < 0 || nx >= map.Width || ny >= map.Height)
+                            {
+                                continue;
+                            }
 
-                        dir[index] = bestDir;
+                            if (offset.x != 0 && offset.y != 0 &&
+                                (!IsWalkable(x + offset.x, y, map.Width, map.Height, walkableBuffer) ||
+                                 !IsWalkable(x, y + offset.y, map.Width, map.Height, walkableBuffer)))
+                            {
+                                continue;
+                            }
+
+                            int nIndex = nx + (ny * map.Width);
+                            if (!walkableBuffer[nIndex].IsWalkable)
+                            {
+                                continue;
+                            }
+
+                            int nDistance = dist[nIndex];
+                            if (nDistance == InfDistance || nDistance >= currentDistance)
+                            {
+                                continue;
+                            }
+
+                            int delta = currentDistance - nDistance;
+                            acc += NeighborDirs8[n] * delta;
+                        }
+
+                        if (math.lengthsq(acc) <= 0.000001f)
+                        {
+                            dir[index] = NoneDirection;
+                            continue;
+                        }
+
+                        float2 v = acc * math.rsqrt(math.lengthsq(acc));
+                        dir[index] = QuantizeDirection(v, dirLut);
                     }
                 }
 
@@ -163,15 +227,21 @@ namespace Project.Map
                 ref FlowFieldBlob root = ref builder.ConstructRoot<FlowFieldBlob>();
                 root.Width = map.Width;
                 root.Height = map.Height;
+                root.DirCount = QuantizedDirCount;
                 root.CellSize = map.TileSize;
                 root.OriginWorld = map.Origin;
 
                 BlobBuilderArray<byte> dirBlob = builder.Allocate(ref root.Dir, tileCount);
                 BlobBuilderArray<ushort> distBlob = builder.Allocate(ref root.Dist, tileCount);
+                BlobBuilderArray<float2> lutBlob = builder.Allocate(ref root.DirLut, QuantizedDirCount);
                 for (int i = 0; i < tileCount; i++)
                 {
                     dirBlob[i] = dir[i];
                     distBlob[i] = dist[i] == InfDistance ? ushort.MaxValue : (ushort)math.min(ushort.MaxValue, dist[i]);
+                }
+                for (int i = 0; i < QuantizedDirCount; i++)
+                {
+                    lutBlob[i] = dirLut[i];
                 }
 
                 BlobAssetReference<FlowFieldBlob> blob = builder.CreateBlobAssetReference<FlowFieldBlob>(Allocator.Persistent);
@@ -206,6 +276,11 @@ namespace Project.Map
                 if (dir.IsCreated)
                 {
                     dir.Dispose();
+                }
+
+                if (dirLut.IsCreated)
+                {
+                    dirLut.Dispose();
                 }
             }
         }
@@ -254,30 +329,42 @@ namespace Project.Map
             queue[tail++] = index;
         }
 
-        private static void TryBestNeighbor(
-            int x,
-            int y,
-            byte dirCode,
-            int currentBest,
-            int width,
-            int height,
-            NativeArray<int> dist,
-            ref int bestDistance,
-            ref byte bestDir)
+        private static bool IsWalkable(int x, int y, int width, int height, DynamicBuffer<MapWalkableCell> walkable)
         {
             if (x < 0 || y < 0 || x >= width || y >= height)
             {
-                return;
+                return false;
             }
 
-            int neighborDistance = dist[x + (y * width)];
-            if (neighborDistance >= currentBest || neighborDistance >= bestDistance)
+            return walkable[x + (y * width)].IsWalkable;
+        }
+
+        private static void BuildDirLut(NativeArray<float2> lut)
+        {
+            float step = (math.PI * 2f) / lut.Length;
+            for (int i = 0; i < lut.Length; i++)
             {
-                return;
+                float angle = i * step;
+                math.sincos(angle, out float s, out float c);
+                lut[i] = new float2(c, s);
+            }
+        }
+
+        private static byte QuantizeDirection(float2 v, NativeArray<float2> lut)
+        {
+            int bestIndex = 0;
+            float bestDot = -2f;
+            for (int i = 0; i < lut.Length; i++)
+            {
+                float dot = math.dot(v, lut[i]);
+                if (dot > bestDot)
+                {
+                    bestDot = dot;
+                    bestIndex = i;
+                }
             }
 
-            bestDistance = neighborDistance;
-            bestDir = dirCode;
+            return (byte)bestIndex;
         }
     }
 }

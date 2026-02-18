@@ -157,16 +157,14 @@ namespace Project.Horde
                 return v * math.rsqrt(lenSq);
             }
 
-            private static float2 GetDirectionFromByte(byte dir)
+            private float2 GetDirectionFromByte(byte dir)
             {
-                return dir switch
+                if (dir >= Flow.Value.DirLut.Length)
                 {
-                    0 => new float2(0f, 1f),
-                    1 => new float2(1f, 0f),
-                    2 => new float2(0f, -1f),
-                    3 => new float2(-1f, 0f),
-                    _ => float2.zero
-                };
+                    return float2.zero;
+                }
+
+                return Flow.Value.DirLut[dir];
             }
         }
     }

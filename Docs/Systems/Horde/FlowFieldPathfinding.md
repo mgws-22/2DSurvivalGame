@@ -12,14 +12,15 @@ Precompute global navigation once per map regenerate, then steer each zombie in 
 `FlowFieldBuildSystem` (`Assets/_Project/Scripts/Map/FlowFieldBuildSystem.cs`) runs only when `FlowFieldDirtyTag` exists:
 1. Collect center goal cells (walkable cells inside center-open radius).
 2. Run 4-neighbor BFS integration field (`dist`).
-3. Derive 4-dir flow byte per cell (`0=N,1=E,2=S,3=W,255=none`).
-4. Bake `dir` + debug `dist` into persistent blob.
-5. Replace old blob, remove dirty tag.
+3. Derive smooth direction by blending improving neighbors (8-neighbor gradient with corner-cutting).
+4. Quantize normalized direction to 32 directions (`byte` index) and bake LUT in blob.
+5. Bake `dir` + debug `dist` into persistent blob.
+6. Replace old blob, remove dirty tag.
 
 ## Runtime Steering Contract
 `ZombieSteeringSystem` consumes the blob:
 - Outside map bounds: steer toward nearest gate world position.
-- Inside map bounds: read `dir[cellIndex]` and convert to direction.
+- Inside map bounds: read `dir[cellIndex]` and fetch unit vector from blob LUT (`DirLut[dir]`).
 - Fallback (`255` or invalid): seek center.
 
 ## Invariants
@@ -31,6 +32,7 @@ Precompute global navigation once per map regenerate, then steer each zombie in 
 - Build complexity: `O(width * height)` per regenerate.
 - Runtime complexity: `O(zombies)` with constant work per zombie (+ small gate loop only when outside bounds).
 - Direction field is byte-packed for memory bandwidth efficiency.
+- Runtime steering remains one byte lookup + LUT fetch.
 
 ## Verification
 1. Open `Assets/Scenes/SampleScene.unity`, enter Play Mode.

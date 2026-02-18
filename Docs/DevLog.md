@@ -270,3 +270,29 @@
 4. Confirm arrows point toward center-open area.
 5. Change `sampleStep` and verify draw density changes clearly.
 6. Toggle `draw` off and confirm no flow gizmos are rendered.
+
+## 2026-02-18 - Smooth flow directions (32-dir quantized gradient)
+
+### What changed
+- Updated flow direction derivation:
+  - `Assets/_Project/Scripts/Map/FlowFieldBuildSystem.cs`
+  - Replaced 4-dir best-neighbor with blended 8-neighbor gradient.
+  - Added diagonal corner-cut prevention.
+  - Quantizes to 32 direction indices and stores LUT in `FlowFieldBlob`.
+- Updated runtime steering/LUT use:
+  - `Assets/_Project/Scripts/Horde/ZombieSteeringSystem.cs`
+- Updated flow gizmo rendering to use blob LUT:
+  - `Assets/_Project/Scripts/Map/Debug/FlowFieldGizmosDrawer.cs`
+- Updated docs:
+  - `Docs/Systems/Horde/FlowFieldPathfinding.md`
+  - `Docs/Systems/Horde/ZombieSteering.md`
+
+### Why
+- Reduce stair-step motion from cardinal-only flow.
+- Keep runtime cost `O(1)` per zombie (`byte` dir lookup + LUT fetch).
+
+### How to test
+1. Enter Play Mode and regenerate map.
+2. In Scene View with gizmos enabled, confirm flow arrows show many angles (not only N/E/S/W).
+3. Observe zombies in open areas move more naturally diagonally toward center.
+4. Confirm no GC alloc spikes in gameplay hot loop.

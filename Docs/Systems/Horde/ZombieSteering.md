@@ -12,7 +12,7 @@ Move zombies using prebuilt flow-field directions in-map and gate-seeking outsid
 ## Steering Logic
 Per zombie update:
 1. If outside map: choose nearest gate and normalize `(gate - pos)`.
-2. If inside map: read flow byte at current cell and map to cardinal direction LUT.
+2. If inside map: read flow byte at current cell and map to 32-direction unit LUT from flow blob.
 3. Fallback for `255`/invalid flow: seek center.
 4. Propose next position `pos + desired * speed * dt`; reject move only if destination is invalid blocked in-map.
 

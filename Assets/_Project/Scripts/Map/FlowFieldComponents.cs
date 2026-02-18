@@ -8,10 +8,12 @@ namespace Project.Map
     {
         public int Width;
         public int Height;
+        public int DirCount;
         public float CellSize;
         public float2 OriginWorld;
         public BlobArray<byte> Dir;
         public BlobArray<ushort> Dist;
+        public BlobArray<float2> DirLut;
     }
 
     public struct FlowFieldSingleton : IComponentData

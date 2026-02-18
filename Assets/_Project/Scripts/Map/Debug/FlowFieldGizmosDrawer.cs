@@ -34,14 +34,6 @@ namespace Project.Map.Debug
         private EntityQuery _mapQuery;
         private bool _queriesInitialized;
 
-        private static readonly float2[] DirLut =
-        {
-            new float2(0f, 1f),  // N
-            new float2(1f, 0f),  // E
-            new float2(0f, -1f), // S
-            new float2(-1f, 0f)  // W
-        };
-
         private void OnDisable()
         {
             DisposeQueries();
@@ -133,7 +125,7 @@ namespace Project.Map.Debug
                     float2 center2 = origin + ((new float2(x + 0.5f, y + 0.5f)) * cellSize);
                     float3 center3 = new float3(center2.x, center2.y, z);
 
-                    if (dir == NoneDirection || dir >= DirLut.Length)
+                    if (dir == NoneDirection || dir >= flow.DirLut.Length)
                     {
                         if (drawUnreachableCross)
                         {
@@ -143,7 +135,7 @@ namespace Project.Map.Debug
                         continue;
                     }
 
-                    float2 d = DirLut[dir];
+                    float2 d = flow.DirLut[dir];
                     DrawArrow(center3, d, arrowScale);
                 }
             }
