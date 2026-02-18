@@ -368,3 +368,30 @@
 2. Confirm zombies no longer stack on identical positions.
 3. Confirm player remains unaffected (separation applies only to `ZombieTag` query).
 4. Profile gameplay and verify `GC Alloc` stays `0 B`.
+
+## 2026-02-18 - Separation robustness in congestion (bounded neighbor work)
+
+### What changed
+- Updated separation config:
+  - `Assets/_Project/Scripts/Horde/ZombieComponents.cs`
+  - added `CellSizeFactor`, `InfluenceRadiusFactor`, `MaxNeighbors`
+- Updated separation runtime:
+  - `Assets/_Project/Scripts/Horde/HordeSeparationSystem.cs`
+  - default tuned for small units: `Radius=0.05`
+  - `cellSize = minDist * CellSizeFactor`
+  - early cull by `InfluenceRadius`
+  - hard cap `MaxNeighbors` per zombie with early loop break
+  - bounded push via `MaxPushPerFrame`
+  - singleton config creation made safe (create only if missing)
+- Updated docs:
+  - `Docs/Systems/Horde/HordeSeparation.md`
+
+### Why
+- Prevent neighbor explosion and frame spikes when many zombies cluster in the same grid cells.
+- Keep per-zombie separation work bounded and predictable for 20k+ stress cases.
+
+### How to test
+1. Create dense crowd clustering near center.
+2. Verify frame-time spikes are reduced versus uncapped separation.
+3. Confirm overlap reduction remains acceptable under heavy load.
+4. Confirm `GC Alloc` remains `0 B` in gameplay.

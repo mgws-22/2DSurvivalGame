@@ -36,8 +36,11 @@ namespace Project.Horde
     public struct HordeSeparationConfig : IComponentData
     {
         public float Radius;
+        public float CellSizeFactor;
+        public float InfluenceRadiusFactor;
         public float SeparationStrength;
         public float MaxPushPerFrame;
+        public int MaxNeighbors;
         public int Iterations;
     }
 }

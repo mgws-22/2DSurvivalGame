@@ -30,15 +30,23 @@ namespace Project.Horde
             _cellToIndex = new NativeParallelMultiHashMap<int, int>(4096, Allocator.Persistent);
 
             state.RequireForUpdate(_zombieQuery);
+            state.RequireForUpdate<HordeSeparationConfig>();
 
-            Entity configEntity = state.EntityManager.CreateEntity(typeof(HordeSeparationConfig));
-            state.EntityManager.SetComponentData(configEntity, new HordeSeparationConfig
+            EntityQuery configQuery = state.GetEntityQuery(ComponentType.ReadWrite<HordeSeparationConfig>());
+            if (configQuery.IsEmptyIgnoreFilter)
             {
-                Radius = 0.25f,
-                SeparationStrength = 0.7f,
-                MaxPushPerFrame = 0.15f,
-                Iterations = 1
-            });
+                Entity configEntity = state.EntityManager.CreateEntity(typeof(HordeSeparationConfig));
+                state.EntityManager.SetComponentData(configEntity, new HordeSeparationConfig
+                {
+                    Radius = 0.05f,
+                    CellSizeFactor = 1.25f,
+                    InfluenceRadiusFactor = 1.5f,
+                    SeparationStrength = 0.7f,
+                    MaxPushPerFrame = 0.12f,
+                    MaxNeighbors = 24,
+                    Iterations = 1
+                });
+            }
         }
 
         public void OnDestroy(ref SystemState state)
@@ -75,11 +83,14 @@ namespace Project.Horde
             HordeSeparationConfig config = SystemAPI.GetSingleton<HordeSeparationConfig>();
             float radius = math.max(0.001f, config.Radius);
             float minDist = radius * 2f;
-            float cellSize = minDist;
+            float cellSize = minDist * math.max(0.5f, config.CellSizeFactor);
             float invCellSize = 1f / cellSize;
             float minDistSq = minDist * minDist;
+            float influenceRadius = minDist * math.max(1f, config.InfluenceRadiusFactor);
+            float influenceRadiusSq = influenceRadius * influenceRadius;
             float separationStrength = math.saturate(config.SeparationStrength);
             float maxPush = math.max(0f, config.MaxPushPerFrame);
+            int maxNeighbors = math.clamp(config.MaxNeighbors, 4, 64);
             int iterations = math.clamp(config.Iterations, 1, 2);
 
             EnsureCapacity(count);
@@ -123,8 +134,10 @@ namespace Project.Horde
                     InvCellSize = invCellSize,
                     MinDistSq = minDistSq,
                     MinDist = minDist,
+                    InfluenceRadiusSq = influenceRadiusSq,
                     MaxPush = maxPush,
-                    SeparationStrength = separationStrength
+                    SeparationStrength = separationStrength,
+                    MaxNeighbors = maxNeighbors
                 };
                 state.Dependency = separateJob.Schedule(count, 128, state.Dependency);
 
@@ -196,14 +209,18 @@ namespace Project.Horde
             public float InvCellSize;
             public float MinDistSq;
             public float MinDist;
+            public float InfluenceRadiusSq;
             public float MaxPush;
             public float SeparationStrength;
+            public int MaxNeighbors;
 
             public void Execute(int index)
             {
                 float2 pos = Positions[index];
                 int2 cell = (int2)math.floor(pos * InvCellSize);
                 float2 correction = float2.zero;
+                int processed = 0;
+                bool reachedCap = false;
 
                 for (int oy = -1; oy <= 1; oy++)
                 {
@@ -224,17 +241,36 @@ namespace Project.Horde
 
                             float2 delta = pos - Positions[neighborIndex];
                             float distSq = math.lengthsq(delta);
-                            if (distSq >= MinDistSq || distSq <= 0.000001f)
+                            if (distSq <= 0.000001f || distSq > InfluenceRadiusSq)
                             {
                                 continue;
                             }
 
-                            float invDist = math.rsqrt(distSq);
-                            float dist = distSq * invDist;
-                            float push = MinDist - dist;
-                            correction += delta * (invDist * push);
+                            if (distSq < MinDistSq)
+                            {
+                                float invDist = math.rsqrt(distSq);
+                                float dist = distSq * invDist;
+                                float push = MinDist - dist;
+                                correction += delta * (invDist * push);
+                                processed++;
+                                if (processed >= MaxNeighbors)
+                                {
+                                    reachedCap = true;
+                                    break;
+                                }
+                            }
                         }
                         while (Grid.TryGetNextValue(out neighborIndex, ref it));
+
+                        if (reachedCap)
+                        {
+                            break;
+                        }
+                    }
+
+                    if (reachedCap)
+                    {
+                        break;
                     }
                 }
 
