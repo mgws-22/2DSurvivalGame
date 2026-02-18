@@ -35,8 +35,8 @@ namespace Project.Map
                 return;
             }
 
-            MapRuntimeData map = SystemAPI.GetComponent<MapRuntimeData>(mapEntity);
-            DynamicBuffer<MapWalkableCell> walkableBuffer = SystemAPI.GetBuffer<MapWalkableCell>(mapEntity, true);
+            MapRuntimeData map = state.EntityManager.GetComponentData<MapRuntimeData>(mapEntity);
+            DynamicBuffer<MapWalkableCell> walkableBuffer = state.EntityManager.GetBuffer<MapWalkableCell>(mapEntity);
             int tileCount = map.Width * map.Height;
             if (tileCount <= 0 || walkableBuffer.Length != tileCount)
             {
@@ -44,7 +44,7 @@ namespace Project.Map
                 return;
             }
 
-            DynamicBuffer<GatePoint> gates = SystemAPI.GetBuffer<GatePoint>(mapEntity, true);
+            DynamicBuffer<GatePoint> gates = state.EntityManager.GetBuffer<GatePoint>(mapEntity);
             double buildStart = Time.realtimeSinceStartupAsDouble;
 
             NativeArray<int> dist = new NativeArray<int>(tileCount, Allocator.Temp);
@@ -114,10 +114,10 @@ namespace Project.Map
 
             while (head < tail)
             {
-                int current = queue[head++];
-                int y = current / map.Width;
-                int x = current - (y * map.Width);
-                int nextDistance = dist[current] + 1;
+                int currentIndex = queue[head++];
+                int y = currentIndex / map.Width;
+                int x = currentIndex - (y * map.Width);
+                int nextDistance = dist[currentIndex] + 1;
 
                 VisitNeighbor(x, y + 1, nextDistance, map.Width, map.Height, walkableBuffer, dist, queue, ref tail);
                 VisitNeighbor(x + 1, y, nextDistance, map.Width, map.Height, walkableBuffer, dist, queue, ref tail);
@@ -170,14 +170,14 @@ namespace Project.Map
             builder.Dispose();
 
             Entity flowEntity = GetOrCreateFlowEntity(ref state);
-            FlowFieldSingleton current = state.EntityManager.GetComponentData<FlowFieldSingleton>(flowEntity);
-            if (current.Blob.IsCreated)
+            FlowFieldSingleton flowSingleton = state.EntityManager.GetComponentData<FlowFieldSingleton>(flowEntity);
+            if (flowSingleton.Blob.IsCreated)
             {
-                current.Blob.Dispose();
+                flowSingleton.Blob.Dispose();
             }
 
-            current.Blob = blob;
-            state.EntityManager.SetComponentData(flowEntity, current);
+            flowSingleton.Blob = blob;
+            state.EntityManager.SetComponentData(flowEntity, flowSingleton);
             state.EntityManager.RemoveComponent<FlowFieldDirtyTag>(mapEntity);
 
             double buildMs = (Time.realtimeSinceStartupAsDouble - buildStart) * 1000.0;
