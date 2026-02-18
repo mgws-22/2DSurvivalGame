@@ -40,7 +40,7 @@ namespace Project.Map
                 gain = 0.45f,
                 warpScale = 0.45f,
                 warpStrength = 1.3f,
-                bandWidth = 0.3f,
+                bandWidth = 0.1f,
                 smoothIterations = 3,
                 centerOpenRadius = 7,
                 gateCountPerSide = 2,

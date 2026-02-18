@@ -25,8 +25,8 @@ namespace Project.Horde
                 state.EntityManager.SetComponentData(e, new WallRepulsionConfig
                 {
                     UnitRadiusWorld = 0.05f,
-                    WallPushStrength = 3f,
-                    MaxWallPushPerFrame = 0.3f,
+                    WallPushStrength = 1f,
+                    MaxWallPushPerFrame = 0.15f,
                     ProjectionSearchRadiusCells = 1
                 });
             }
