@@ -327,3 +327,20 @@
 2. Confirm flow gizmo bounds include spawn margin area.
 3. Spawn zombies in outer ring and verify they immediately follow flow inward without gate targeting.
 4. Confirm `GC Alloc` remains `0 B` in hot gameplay loop.
+
+## 2026-02-18 - Baking + gizmo teardown stability fixes
+
+### What changed
+- Removed duplicate `SpriteRenderer` companion add in zombie baker:
+  - `Assets/_Project/Scripts/Horde/ZombieAuthoring.cs`
+- Hardened flow gizmo query cleanup during editor world teardown:
+  - `Assets/_Project/Scripts/Map/Debug/FlowFieldGizmosDrawer.cs`
+
+### Why
+- Baking error came from adding `SpriteRenderer` companion twice (already added by `SpriteRendererCompanionBaker`).
+- Editor disable path could dispose stale query handles after world destruction.
+
+### How to test
+1. Recompile and enter Play Mode.
+2. Confirm no baking error about duplicate `SpriteRenderer`.
+3. Toggle/disable object with `FlowFieldGizmosDrawer` and confirm no teardown exception appears.

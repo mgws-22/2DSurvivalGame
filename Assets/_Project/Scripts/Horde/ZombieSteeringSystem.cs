@@ -84,8 +84,8 @@ namespace Project.Horde
             private float2 ResolveDesiredDirection(float2 position)
             {
                 ref FlowFieldBlob flow = ref Flow.Value;
-                int2 grid = WorldToFlowGrid(position, flow);
-                if (!IsInFlowBounds(grid, flow))
+                int2 grid = WorldToFlowGrid(position, ref flow);
+                if (!IsInFlowBounds(grid, ref flow))
                 {
                     return NormalizeFast(MapData.CenterWorld - position);
                 }
@@ -108,8 +108,8 @@ namespace Project.Horde
             private bool IsWorldPositionWalkable(float2 worldPosition)
             {
                 ref FlowFieldBlob flow = ref Flow.Value;
-                int2 grid = WorldToFlowGrid(worldPosition, flow);
-                if (!IsInFlowBounds(grid, flow))
+                int2 grid = WorldToFlowGrid(worldPosition, ref flow);
+                if (!IsInFlowBounds(grid, ref flow))
                 {
                     return true;
                 }

@@ -162,8 +162,24 @@ namespace Project.Map.Debug
         {
             if (_queriesInitialized)
             {
-                _flowQuery.Dispose();
-                _mapQuery.Dispose();
+                // Editor worlds can be torn down before this MonoBehaviour disables.
+                // In that case, disposing old query handles can throw; ignore safely.
+                try
+                {
+                    _flowQuery.Dispose();
+                }
+                catch
+                {
+                }
+
+                try
+                {
+                    _mapQuery.Dispose();
+                }
+                catch
+                {
+                }
+
                 _queriesInitialized = false;
             }
 

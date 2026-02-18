@@ -371,8 +371,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Project.Horde.ZombieSpawnConfigAuthoring
   _zombiePrefab: {fileID: 2940900018987325336, guid: 4272358af0497654bbe12dbc757acdf4, type: 3}
   _spawnRate: 1
-  _spawnBatchSize: 55
-  _maxAlive: 66666
+  _spawnBatchSize: 2222
+  _maxAlive: 22222
   _seed: 12345
 --- !u!4 &1862250333
 Transform:
