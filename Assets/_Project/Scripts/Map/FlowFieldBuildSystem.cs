@@ -44,144 +44,170 @@ namespace Project.Map
                 return;
             }
 
-            DynamicBuffer<GatePoint> gates = state.EntityManager.GetBuffer<GatePoint>(mapEntity);
+            int gateCount = 0;
+            if (state.EntityManager.HasBuffer<GatePoint>(mapEntity))
+            {
+                DynamicBuffer<GatePoint> gates = state.EntityManager.GetBuffer<GatePoint>(mapEntity);
+                gateCount = gates.Length;
+            }
+
             double buildStart = Time.realtimeSinceStartupAsDouble;
 
             NativeArray<int> dist = new NativeArray<int>(tileCount, Allocator.Temp);
             NativeArray<int> queue = new NativeArray<int>(tileCount, Allocator.Temp);
             NativeArray<byte> dir = new NativeArray<byte>(tileCount, Allocator.Temp);
-            for (int i = 0; i < tileCount; i++)
+            try
             {
-                dist[i] = InfDistance;
-                dir[i] = NoneDirection;
-            }
-
-            int2 center = map.WorldToGrid(map.CenterWorld);
-            int radius = math.max(0, map.CenterOpenRadius);
-            int radiusSq = radius * radius;
-            int head = 0;
-            int tail = 0;
-
-            int minY = math.max(0, center.y - radius);
-            int maxY = math.min(map.Height - 1, center.y + radius);
-            for (int y = minY; y <= maxY; y++)
-            {
-                int dy = y - center.y;
-                int row = y * map.Width;
-                int minX = math.max(0, center.x - radius);
-                int maxX = math.min(map.Width - 1, center.x + radius);
-
-                for (int x = minX; x <= maxX; x++)
+                for (int i = 0; i < tileCount; i++)
                 {
-                    int dx = x - center.x;
-                    if ((dx * dx) + (dy * dy) > radiusSq)
-                    {
-                        continue;
-                    }
-
-                    int index = row + x;
-                    if (!walkableBuffer[index].IsWalkable || dist[index] == 0)
-                    {
-                        continue;
-                    }
-
-                    dist[index] = 0;
-                    queue[tail++] = index;
+                    dist[i] = InfDistance;
+                    dir[i] = NoneDirection;
                 }
-            }
 
-            if (tail == 0)
-            {
-                int fallback = map.ToIndex(new int2(math.clamp(center.x, 0, map.Width - 1), math.clamp(center.y, 0, map.Height - 1)));
-                if (walkableBuffer[fallback].IsWalkable)
+                int2 center = map.WorldToGrid(map.CenterWorld);
+                int radius = math.max(0, map.CenterOpenRadius);
+                int radiusSq = radius * radius;
+                int head = 0;
+                int tail = 0;
+
+                int minY = math.max(0, center.y - radius);
+                int maxY = math.min(map.Height - 1, center.y + radius);
+                for (int y = minY; y <= maxY; y++)
                 {
-                    dist[fallback] = 0;
-                    queue[tail++] = fallback;
-                }
-                else
-                {
-                    for (int i = 0; i < tileCount; i++)
+                    int dy = y - center.y;
+                    int row = y * map.Width;
+                    int minX = math.max(0, center.x - radius);
+                    int maxX = math.min(map.Width - 1, center.x + radius);
+
+                    for (int x = minX; x <= maxX; x++)
                     {
-                        if (walkableBuffer[i].IsWalkable)
+                        int dx = x - center.x;
+                        if ((dx * dx) + (dy * dy) > radiusSq)
                         {
-                            dist[i] = 0;
-                            queue[tail++] = i;
-                            break;
+                            continue;
+                        }
+
+                        int index = row + x;
+                        if (!walkableBuffer[index].IsWalkable || dist[index] == 0)
+                        {
+                            continue;
+                        }
+
+                        dist[index] = 0;
+                        queue[tail++] = index;
+                    }
+                }
+
+                if (tail == 0)
+                {
+                    int fallback = map.ToIndex(new int2(math.clamp(center.x, 0, map.Width - 1), math.clamp(center.y, 0, map.Height - 1)));
+                    if (walkableBuffer[fallback].IsWalkable)
+                    {
+                        dist[fallback] = 0;
+                        queue[tail++] = fallback;
+                    }
+                    else
+                    {
+                        for (int i = 0; i < tileCount; i++)
+                        {
+                            if (walkableBuffer[i].IsWalkable)
+                            {
+                                dist[i] = 0;
+                                queue[tail++] = i;
+                                break;
+                            }
                         }
                     }
                 }
-            }
 
-            while (head < tail)
-            {
-                int currentIndex = queue[head++];
-                int y = currentIndex / map.Width;
-                int x = currentIndex - (y * map.Width);
-                int nextDistance = dist[currentIndex] + 1;
-
-                VisitNeighbor(x, y + 1, nextDistance, map.Width, map.Height, walkableBuffer, dist, queue, ref tail);
-                VisitNeighbor(x + 1, y, nextDistance, map.Width, map.Height, walkableBuffer, dist, queue, ref tail);
-                VisitNeighbor(x, y - 1, nextDistance, map.Width, map.Height, walkableBuffer, dist, queue, ref tail);
-                VisitNeighbor(x - 1, y, nextDistance, map.Width, map.Height, walkableBuffer, dist, queue, ref tail);
-            }
-
-            int reachableCount = 0;
-            for (int y = 0; y < map.Height; y++)
-            {
-                int row = y * map.Width;
-                for (int x = 0; x < map.Width; x++)
+                while (head < tail)
                 {
-                    int index = row + x;
-                    if (!walkableBuffer[index].IsWalkable || dist[index] == InfDistance)
+                    int currentIndex = queue[head++];
+                    int y = currentIndex / map.Width;
+                    int x = currentIndex - (y * map.Width);
+                    int nextDistance = dist[currentIndex] + 1;
+
+                    VisitNeighbor(x, y + 1, nextDistance, map.Width, map.Height, walkableBuffer, dist, queue, ref tail);
+                    VisitNeighbor(x + 1, y, nextDistance, map.Width, map.Height, walkableBuffer, dist, queue, ref tail);
+                    VisitNeighbor(x, y - 1, nextDistance, map.Width, map.Height, walkableBuffer, dist, queue, ref tail);
+                    VisitNeighbor(x - 1, y, nextDistance, map.Width, map.Height, walkableBuffer, dist, queue, ref tail);
+                }
+
+                int reachableCount = 0;
+                for (int y = 0; y < map.Height; y++)
+                {
+                    int row = y * map.Width;
+                    for (int x = 0; x < map.Width; x++)
                     {
-                        dir[index] = NoneDirection;
-                        continue;
+                        int index = row + x;
+                        if (!walkableBuffer[index].IsWalkable || dist[index] == InfDistance)
+                        {
+                            dir[index] = NoneDirection;
+                            continue;
+                        }
+
+                        reachableCount++;
+                        int bestDistance = dist[index];
+                        byte bestDir = NoneDirection;
+
+                        TryBestNeighbor(x, y + 1, 0, bestDistance, map.Width, map.Height, dist, ref bestDistance, ref bestDir);
+                        TryBestNeighbor(x + 1, y, 1, bestDistance, map.Width, map.Height, dist, ref bestDistance, ref bestDir);
+                        TryBestNeighbor(x, y - 1, 2, bestDistance, map.Width, map.Height, dist, ref bestDistance, ref bestDir);
+                        TryBestNeighbor(x - 1, y, 3, bestDistance, map.Width, map.Height, dist, ref bestDistance, ref bestDir);
+
+                        dir[index] = bestDir;
                     }
+                }
 
-                    reachableCount++;
-                    int bestDistance = dist[index];
-                    byte bestDir = NoneDirection;
+                BlobBuilder builder = new BlobBuilder(Allocator.Temp);
+                ref FlowFieldBlob root = ref builder.ConstructRoot<FlowFieldBlob>();
+                root.Width = map.Width;
+                root.Height = map.Height;
+                root.CellSize = map.TileSize;
+                root.OriginWorld = map.Origin;
 
-                    TryBestNeighbor(x, y + 1, 0, bestDistance, map.Width, map.Height, dist, ref bestDistance, ref bestDir);
-                    TryBestNeighbor(x + 1, y, 1, bestDistance, map.Width, map.Height, dist, ref bestDistance, ref bestDir);
-                    TryBestNeighbor(x, y - 1, 2, bestDistance, map.Width, map.Height, dist, ref bestDistance, ref bestDir);
-                    TryBestNeighbor(x - 1, y, 3, bestDistance, map.Width, map.Height, dist, ref bestDistance, ref bestDir);
+                BlobBuilderArray<byte> dirBlob = builder.Allocate(ref root.Dir, tileCount);
+                BlobBuilderArray<ushort> distBlob = builder.Allocate(ref root.Dist, tileCount);
+                for (int i = 0; i < tileCount; i++)
+                {
+                    dirBlob[i] = dir[i];
+                    distBlob[i] = dist[i] == InfDistance ? ushort.MaxValue : (ushort)math.min(ushort.MaxValue, dist[i]);
+                }
 
-                    dir[index] = bestDir;
+                BlobAssetReference<FlowFieldBlob> blob = builder.CreateBlobAssetReference<FlowFieldBlob>(Allocator.Persistent);
+                builder.Dispose();
+
+                Entity flowEntity = GetOrCreateFlowEntity(ref state);
+                FlowFieldSingleton flowSingleton = state.EntityManager.GetComponentData<FlowFieldSingleton>(flowEntity);
+                if (flowSingleton.Blob.IsCreated)
+                {
+                    flowSingleton.Blob.Dispose();
+                }
+
+                flowSingleton.Blob = blob;
+                state.EntityManager.SetComponentData(flowEntity, flowSingleton);
+                state.EntityManager.RemoveComponent<FlowFieldDirtyTag>(mapEntity);
+
+                double buildMs = (Time.realtimeSinceStartupAsDouble - buildStart) * 1000.0;
+                Debug.Log($"FlowField built {map.Width}x{map.Height} in {buildMs:F2} ms. Reachable={reachableCount} Gates={gateCount}");
+            }
+            finally
+            {
+                if (dist.IsCreated)
+                {
+                    dist.Dispose();
+                }
+
+                if (queue.IsCreated)
+                {
+                    queue.Dispose();
+                }
+
+                if (dir.IsCreated)
+                {
+                    dir.Dispose();
                 }
             }
-
-            BlobBuilder builder = new BlobBuilder(Allocator.Temp);
-            ref FlowFieldBlob root = ref builder.ConstructRoot<FlowFieldBlob>();
-            root.Width = map.Width;
-            root.Height = map.Height;
-            root.CellSize = map.TileSize;
-            root.OriginWorld = map.Origin;
-
-            BlobBuilderArray<byte> dirBlob = builder.Allocate(ref root.Dir, tileCount);
-            BlobBuilderArray<ushort> distBlob = builder.Allocate(ref root.Dist, tileCount);
-            for (int i = 0; i < tileCount; i++)
-            {
-                dirBlob[i] = dir[i];
-                distBlob[i] = dist[i] == InfDistance ? ushort.MaxValue : (ushort)math.min(ushort.MaxValue, dist[i]);
-            }
-
-            BlobAssetReference<FlowFieldBlob> blob = builder.CreateBlobAssetReference<FlowFieldBlob>(Allocator.Persistent);
-            builder.Dispose();
-
-            Entity flowEntity = GetOrCreateFlowEntity(ref state);
-            FlowFieldSingleton flowSingleton = state.EntityManager.GetComponentData<FlowFieldSingleton>(flowEntity);
-            if (flowSingleton.Blob.IsCreated)
-            {
-                flowSingleton.Blob.Dispose();
-            }
-
-            flowSingleton.Blob = blob;
-            state.EntityManager.SetComponentData(flowEntity, flowSingleton);
-            state.EntityManager.RemoveComponent<FlowFieldDirtyTag>(mapEntity);
-
-            double buildMs = (Time.realtimeSinceStartupAsDouble - buildStart) * 1000.0;
-            Debug.Log($"FlowField built {map.Width}x{map.Height} in {buildMs:F2} ms. Reachable={reachableCount} Gates={gates.Length}");
         }
 
         private static Entity GetOrCreateFlowEntity(ref SystemState state)
