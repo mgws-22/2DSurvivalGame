@@ -124,7 +124,7 @@ namespace Project.Horde
                     return false;
                 }
 
-                return flow.Dir[index] != NoneDirection || flow.Dist[index] == 0;
+                return flow.Dist[index] != ushort.MaxValue;
             }
 
             private float2 DirectionToNearestGate(float2 position)

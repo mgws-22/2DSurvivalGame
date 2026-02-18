@@ -214,7 +214,53 @@ namespace Project.Map
 
                         if (math.lengthsq(acc) <= 0.000001f)
                         {
-                            dir[index] = NoneDirection;
+                            float2 fallbackDir = float2.zero;
+                            int bestDelta = 0;
+
+                            for (int n = 0; n < NeighborOffsets8.Length; n++)
+                            {
+                                int2 offset = NeighborOffsets8[n];
+                                int nx = x + offset.x;
+                                int ny = y + offset.y;
+                                if (nx < 0 || ny < 0 || nx >= map.Width || ny >= map.Height)
+                                {
+                                    continue;
+                                }
+
+                                if (offset.x != 0 && offset.y != 0 &&
+                                    (!IsWalkable(x + offset.x, y, map.Width, map.Height, walkableBuffer) ||
+                                     !IsWalkable(x, y + offset.y, map.Width, map.Height, walkableBuffer)))
+                                {
+                                    continue;
+                                }
+
+                                int nIndex = nx + (ny * map.Width);
+                                if (!walkableBuffer[nIndex].IsWalkable)
+                                {
+                                    continue;
+                                }
+
+                                int nDistance = dist[nIndex];
+                                if (nDistance == InfDistance || nDistance >= currentDistance)
+                                {
+                                    continue;
+                                }
+
+                                int delta = currentDistance - nDistance;
+                                if (delta > bestDelta)
+                                {
+                                    bestDelta = delta;
+                                    fallbackDir = NeighborDirs8[n];
+                                }
+                            }
+
+                            if (bestDelta <= 0)
+                            {
+                                dir[index] = NoneDirection;
+                                continue;
+                            }
+
+                            dir[index] = QuantizeDirection(fallbackDir, dirLut);
                             continue;
                         }
 
