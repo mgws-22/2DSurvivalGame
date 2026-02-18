@@ -73,7 +73,7 @@ namespace Project.Map
                 finalGateCenters[i] = gateScratch[i];
             }
 
-            MapData mapData = new MapData(width, height, config.tileSize, config.spawnMargin, worldOrigin, finalGateCenters);
+            MapData mapData = new MapData(width, height, config.tileSize, config.spawnMargin, config.centerOpenRadius, worldOrigin, finalGateCenters);
             mapData.FillFromWalkable(walkable);
             return mapData;
         }

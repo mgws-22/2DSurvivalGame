@@ -219,3 +219,34 @@
 1. Enter Play Mode in `Assets/Scenes/SampleScene.unity`.
 2. Confirm zombies still spawn and move as before.
 3. Confirm zombie-related diagnostic spam is gone from Console.
+
+## 2026-02-18 - Plan A flow-field pathfinding + gate-seeking steering
+
+### What changed
+- Added flow-field ECS data and triggers:
+  - `Assets/_Project/Scripts/Map/FlowFieldComponents.cs`
+  - `Assets/_Project/Scripts/Map/MapEcsBridge.cs`
+- Added flow build system (dirty-triggered BFS build to BlobAsset):
+  - `Assets/_Project/Scripts/Map/FlowFieldBuildSystem.cs`
+- Updated map runtime payload to include center-open radius:
+  - `Assets/_Project/Scripts/Map/MapData.cs`
+  - `Assets/_Project/Scripts/Map/MapGenerator.cs`
+- Replaced per-zombie local candidate scan with flow/gate steering:
+  - `Assets/_Project/Scripts/Horde/ZombieSteeringSystem.cs`
+- Added/updated docs:
+  - `Docs/Systems/Horde/FlowFieldPathfinding.md`
+  - `Docs/Systems/Horde/ZombieSteering.md`
+  - `Docs/Architecture/Index.md`
+
+### Why
+- Needed static-map pathfinding that scales to 20k+ zombies without per-frame path solve.
+- Needed deterministic route-to-center behavior from both outside and inside map bounds.
+- Needed cache-friendly runtime lookup (`byte` direction field) and one-time build on map regenerate.
+
+### How to test
+1. Open `Assets/Scenes/SampleScene.unity`.
+2. Enter Play Mode and regenerate map at least once.
+3. Confirm one flow build log appears (`FlowField built ...`).
+4. Verify zombies spawned outside map move to nearest gate and enter map.
+5. Verify in-map zombies follow corridors toward center-open area.
+6. Profile gameplay and confirm `GC Alloc` remains `0 B` in hot loop.

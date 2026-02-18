@@ -91,6 +91,8 @@ This creates stripe/isoline-style corridors suitable for labyrinth layouts.
 - Bridge data:
   - `MapRuntimeData` singleton: width/height/tileSize/origin/spawnMargin/center
   - `MapWalkableCell` dynamic buffer: dense walkability grid (`0/1`)
+  - `GatePoint` dynamic buffer: gate world positions
+  - `FlowFieldDirtyTag`: triggers single rebuild of flow field for the new map
 - This enables Burst ECS systems to query map walkability without managed `MapData` access.
 
 ## Performance Notes

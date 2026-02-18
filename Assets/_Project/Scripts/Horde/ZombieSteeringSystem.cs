@@ -11,10 +11,14 @@ namespace Project.Horde
     [UpdateInGroup(typeof(SimulationSystemGroup))]
     public partial struct ZombieSteeringSystem : ISystem
     {
+        private const byte NoneDirection = 255;
+
         [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
             state.RequireForUpdate<MapRuntimeData>();
+            state.RequireForUpdate<FlowFieldSingleton>();
+            state.RequireForUpdate<GatePoint>();
             state.RequireForUpdate<ZombieTag>();
         }
 
@@ -28,13 +32,19 @@ namespace Project.Horde
             }
 
             MapRuntimeData mapData = SystemAPI.GetSingleton<MapRuntimeData>();
-            DynamicBuffer<MapWalkableCell> walkableBuffer = SystemAPI.GetSingletonBuffer<MapWalkableCell>(true);
+            DynamicBuffer<GatePoint> gates = SystemAPI.GetSingletonBuffer<GatePoint>(true);
+            FlowFieldSingleton flowSingleton = SystemAPI.GetSingleton<FlowFieldSingleton>();
+            if (!flowSingleton.Blob.IsCreated)
+            {
+                return;
+            }
 
             ZombieSteeringJob job = new ZombieSteeringJob
             {
                 DeltaTime = deltaTime,
                 MapData = mapData,
-                Walkable = walkableBuffer.AsNativeArray()
+                Gates = gates.AsNativeArray(),
+                Flow = flowSingleton.Blob
             };
 
             state.Dependency = job.ScheduleParallel(state.Dependency);
@@ -45,90 +55,58 @@ namespace Project.Horde
         {
             public float DeltaTime;
             public MapRuntimeData MapData;
-
-            [ReadOnly] public NativeArray<MapWalkableCell> Walkable;
+            [ReadOnly] public NativeArray<GatePoint> Gates;
+            [ReadOnly] public BlobAssetReference<FlowFieldBlob> Flow;
 
             private void Execute(ref LocalTransform transform, ref ZombieSteeringState steeringState, in ZombieMoveSpeed moveSpeed, in ZombieTag tag)
             {
                 float2 position = transform.Position.xy;
-                float2 toCenter = MapData.CenterWorld - position;
-                float currentDistanceSq = math.lengthsq(toCenter);
-                if (currentDistanceSq <= 0.0001f)
-                {
-                    steeringState.LastDirection = float2.zero;
-                    return;
-                }
-
                 float stepDistance = moveSpeed.Value * DeltaTime;
                 if (stepDistance <= 0f)
                 {
                     return;
                 }
 
-                float2 desiredDirection = math.normalizesafe(toCenter);
-                float2 bestDirection = float2.zero;
-                float bestDistanceSq = currentDistanceSq;
-                bool found = false;
-
-                TryDirection(
-                    desiredDirection,
-                    stepDistance,
-                    position,
-                    ref bestDirection,
-                    ref bestDistanceSq,
-                    ref found);
-
-                for (int i = 0; i < 8; i++)
-                {
-                    float2 dir = GetDirectionFromIndex(i);
-                    TryDirection(
-                        dir,
-                        stepDistance,
-                        position,
-                        ref bestDirection,
-                        ref bestDistanceSq,
-                        ref found);
-                }
-
-                if (!found)
+                float2 desiredDirection = ResolveDesiredDirection(position);
+                if (math.lengthsq(desiredDirection) < 0.0001f)
                 {
                     steeringState.LastDirection = float2.zero;
                     return;
                 }
 
-                float2 nextPosition = position + (bestDirection * stepDistance);
-                transform.Position = new float3(nextPosition.x, nextPosition.y, transform.Position.z);
-                steeringState.LastDirection = bestDirection;
-            }
-
-            private void TryDirection(
-                float2 direction,
-                float stepDistance,
-                float2 currentPosition,
-                ref float2 bestDirection,
-                ref float bestDistanceSq,
-                ref bool found)
-            {
-                if (math.lengthsq(direction) < 0.0001f)
-                {
-                    return;
-                }
-
-                float2 nextPosition = currentPosition + (direction * stepDistance);
+                float2 nextPosition = position + (desiredDirection * stepDistance);
                 if (!IsWorldPositionWalkable(nextPosition))
                 {
+                    steeringState.LastDirection = float2.zero;
                     return;
                 }
 
-                float distanceSq = math.lengthsq(MapData.CenterWorld - nextPosition);
-                if (distanceSq + 0.00001f >= bestDistanceSq)
+                transform.Position = new float3(nextPosition.x, nextPosition.y, transform.Position.z);
+                steeringState.LastDirection = desiredDirection;
+            }
+
+            private float2 ResolveDesiredDirection(float2 position)
+            {
+                int2 grid = MapData.WorldToGrid(position);
+                if (!MapData.IsInMap(grid))
                 {
-                    return;
+                    return DirectionToNearestGate(position);
                 }
 
-                bestDistanceSq = distanceSq;
-                bestDirection = direction;
-                found = true;
+                int flowIndex = MapData.ToIndex(grid);
+                ref FlowFieldBlob flow = ref Flow.Value;
+                if (flowIndex < 0 || flowIndex >= flow.Dir.Length)
+                {
+                    return NormalizeFast(MapData.CenterWorld - position);
+                }
+
+                byte dir = flow.Dir[flowIndex];
+                if (dir == NoneDirection)
+                {
+                    return NormalizeFast(MapData.CenterWorld - position);
+                }
+
+                return GetDirectionFromByte(dir);
             }
 
             private bool IsWorldPositionWalkable(float2 worldPosition)
@@ -140,28 +118,54 @@ namespace Project.Horde
                 }
 
                 int index = MapData.ToIndex(grid);
-                if (index < 0 || index >= Walkable.Length)
+                ref FlowFieldBlob flow = ref Flow.Value;
+                if (index < 0 || index >= flow.Dir.Length)
                 {
                     return false;
                 }
 
-                return Walkable[index].IsWalkable;
+                return flow.Dir[index] != NoneDirection || flow.Dist[index] == 0;
             }
 
-            private static float2 GetDirectionFromIndex(int index)
+            private float2 DirectionToNearestGate(float2 position)
             {
-                const float diagonal = 0.70710677f;
+                float2 bestDelta = MapData.CenterWorld - position;
+                float bestLenSq = math.lengthsq(bestDelta);
 
-                return index switch
+                for (int i = 0; i < Gates.Length; i++)
+                {
+                    float2 delta = Gates[i].WorldPos - position;
+                    float lenSq = math.lengthsq(delta);
+                    if (lenSq < bestLenSq)
+                    {
+                        bestLenSq = lenSq;
+                        bestDelta = delta;
+                    }
+                }
+
+                return NormalizeFast(bestDelta);
+            }
+
+            private static float2 NormalizeFast(float2 v)
+            {
+                float lenSq = math.lengthsq(v);
+                if (lenSq <= 0.000001f)
+                {
+                    return float2.zero;
+                }
+
+                return v * math.rsqrt(lenSq);
+            }
+
+            private static float2 GetDirectionFromByte(byte dir)
+            {
+                return dir switch
                 {
                     0 => new float2(0f, 1f),
-                    1 => new float2(diagonal, diagonal),
-                    2 => new float2(1f, 0f),
-                    3 => new float2(diagonal, -diagonal),
-                    4 => new float2(0f, -1f),
-                    5 => new float2(-diagonal, -diagonal),
-                    6 => new float2(-1f, 0f),
-                    _ => new float2(-diagonal, diagonal)
+                    1 => new float2(1f, 0f),
+                    2 => new float2(0f, -1f),
+                    3 => new float2(-1f, 0f),
+                    _ => float2.zero
                 };
             }
         }

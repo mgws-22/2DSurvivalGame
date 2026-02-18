@@ -14,18 +14,20 @@ namespace Project.Map
         public int Height { get; }
         public float TileSize { get; }
         public int SpawnMargin { get; }
+        public int CenterOpenRadius { get; }
 
         public float2 WorldOrigin { get; }
 
         public int TileCount => _tileType.Length;
         public int GateCount => _gateCenters.Length;
 
-        public MapData(int width, int height, float tileSize, int spawnMargin, float2 worldOrigin, int2[] gateCenters)
+        public MapData(int width, int height, float tileSize, int spawnMargin, int centerOpenRadius, float2 worldOrigin, int2[] gateCenters)
         {
             Width = width;
             Height = height;
             TileSize = tileSize;
             SpawnMargin = spawnMargin;
+            CenterOpenRadius = centerOpenRadius;
             WorldOrigin = worldOrigin;
 
             _tileType = new TileType[width * height];

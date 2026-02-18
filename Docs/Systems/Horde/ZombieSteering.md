@@ -1,33 +1,30 @@
 # ZombieSteeringSystem
 
 ## Purpose
-Move zombies toward map center without full pathfinding while preventing stepping onto cliff tiles.
+Move zombies using prebuilt flow-field directions in-map and gate-seeking outside map bounds.
 
 ## Data
 - `ZombieTag`, `ZombieMoveSpeed`, `ZombieSteeringState` (`Assets/_Project/Scripts/Horde/ZombieComponents.cs`)
 - `LocalTransform` (Unity.Transforms)
-- `MapRuntimeData` + `MapWalkableCell` (`Assets/_Project/Scripts/Map/MapEcsBridge.cs`)
+- `MapRuntimeData` + `GatePoint` (`Assets/_Project/Scripts/Map/MapEcsBridge.cs`, `Assets/_Project/Scripts/Map/FlowFieldComponents.cs`)
+- `FlowFieldSingleton` (`Assets/_Project/Scripts/Map/FlowFieldComponents.cs`)
 
 ## Steering Logic
 Per zombie update:
-1. Compute desired direction toward map center.
-2. Propose next position `pos + desired * speed * dt`.
-3. If destination is inside map and destination tile is cliff, reject it.
-4. Evaluate fallback directions from 8 compass directions (N, NE, E, SE, S, SW, W, NW).
-5. Pick walkable candidate that reduces squared distance to center the most.
-6. If no candidate improves distance, stay in place.
-
-Outside-map movement is allowed so zombies can travel from spawn ring into map entrances.
+1. If outside map: choose nearest gate and normalize `(gate - pos)`.
+2. If inside map: read flow byte at current cell and map to cardinal direction LUT.
+3. Fallback for `255`/invalid flow: seek center.
+4. Propose next position `pos + desired * speed * dt`; reject move only if destination is invalid blocked in-map.
 
 ## Invariants
 - Zombies never intentionally step onto blocked map cells.
-- Movement remains center-seeking when walkable options exist.
-- No path graph or global path cache is required.
+- Zombies outside bounds are directed to nearest gate.
+- Runtime uses immutable flow blob, no per-zombie path graph solve.
 
 ## Performance
 - Burst-compiled `IJobEntity` update.
 - Allocation-free per frame.
-- Complexity: `O(zombies * candidates)` where candidates are fixed (9 total including desired).
+- Complexity: `O(zombies)` in-map, with only a constant-size flow lookup.
 
 ## Known Limits
 - Can stall at local minima near cliffs.
@@ -35,6 +32,7 @@ Outside-map movement is allowed so zombies can travel from spawn ring into map e
 
 ## Verification
 1. Enter Play Mode with map and spawn systems active.
-2. Observe zombies move inward toward center.
-3. Confirm zombies do not traverse cliff tiles.
-4. Verify behavior remains stable across map regenerations for same seed/config.
+2. Confirm zombies spawned outside map first aim for nearest gate and enter map.
+3. Confirm in-map zombies follow corridors toward center.
+4. Confirm zombies do not traverse blocked cells.
+5. Verify behavior remains stable after repeated map regenerations.

@@ -9,6 +9,7 @@ namespace Project.Map
         public int Width;
         public int Height;
         public int SpawnMargin;
+        public int CenterOpenRadius;
         public float TileSize;
         public float2 Origin;
         public float2 CenterWorld;
@@ -65,7 +66,7 @@ namespace Project.Map
             Entity mapEntity;
             if (query.IsEmptyIgnoreFilter)
             {
-                mapEntity = entityManager.CreateEntity(typeof(MapRuntimeData), typeof(MapWalkableCell));
+                mapEntity = entityManager.CreateEntity(typeof(MapRuntimeData), typeof(MapWalkableCell), typeof(GatePoint));
             }
             else
             {
@@ -73,6 +74,11 @@ namespace Project.Map
             }
 
             query.Dispose();
+
+            if (!entityManager.HasComponent<GatePoint>(mapEntity))
+            {
+                entityManager.AddBuffer<GatePoint>(mapEntity);
+            }
 
             float2 centerWorld = mapData.WorldOrigin +
                 (new float2(mapData.Width * mapData.TileSize, mapData.Height * mapData.TileSize) * 0.5f);
@@ -82,6 +88,7 @@ namespace Project.Map
                 Width = mapData.Width,
                 Height = mapData.Height,
                 SpawnMargin = mapData.SpawnMargin,
+                CenterOpenRadius = mapData.CenterOpenRadius,
                 TileSize = mapData.TileSize,
                 Origin = mapData.WorldOrigin,
                 CenterWorld = centerWorld
@@ -100,6 +107,21 @@ namespace Project.Map
                 {
                     Value = mapData.IsWalkable(grid.x, grid.y) ? (byte)1 : (byte)0
                 };
+            }
+
+            DynamicBuffer<GatePoint> gates = entityManager.GetBuffer<GatePoint>(mapEntity);
+            gates.ResizeUninitialized(mapData.GateCount);
+            for (int i = 0; i < mapData.GateCount; i++)
+            {
+                gates[i] = new GatePoint
+                {
+                    WorldPos = mapData.GridToWorld(mapData.GetGateCenter(i))
+                };
+            }
+
+            if (!entityManager.HasComponent<FlowFieldDirtyTag>(mapEntity))
+            {
+                entityManager.AddComponent<FlowFieldDirtyTag>(mapEntity);
             }
 
             return true;
