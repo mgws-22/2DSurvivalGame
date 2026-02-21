@@ -45,6 +45,7 @@ Optional second pass is supported via `Iterations` (clamped to `1..2`).
 - Burst jobs for snapshot, grid build, separation, and writeback.
 - Complexity: `O(N * k)` where `k` is local neighbors in adjacent cells.
 - Persistent native containers reused each frame.
+- Spatial grid clear is chained as a job between iterations to avoid main-thread `Complete()`/sync points.
 
 ## Verification
 1. Enter Play Mode with large zombie count (target 20k+).

@@ -128,8 +128,11 @@ namespace Project.Horde
 
             float targetUnitsPerCell = math.max(0f, config.TargetUnitsPerCell);
             float pressureStrength = math.max(0f, config.PressureStrength);
-            float maxPushThisFrame = math.max(0f, config.MaxPushPerFrame) * deltaTime;
             float speedFractionCap = math.clamp(config.SpeedFractionCap, 0f, 1f);
+            float maxPushFromConfig = math.max(0f, config.MaxPushPerFrame) * deltaTime;
+            float referenceMoveSpeed = 1f;
+            float maxPushFromSpeed = referenceMoveSpeed * deltaTime * speedFractionCap;
+            float maxPushThisFrame = math.min(maxPushFromConfig, maxPushFromSpeed);
             float blockedPenalty = math.max(0f, config.BlockedCellPenalty);
             int fieldInterval = math.clamp(config.FieldUpdateIntervalFrames, 1, 8);
             int blurPasses = math.clamp(config.BlurPasses, 0, 2);
@@ -146,12 +149,16 @@ namespace Project.Horde
                 };
                 dependency = clearDensityJob.Schedule(cellCount, 256, dependency);
 
-                AccumulateDensityJob accumulateDensityJob = new AccumulateDensityJob
+                unsafe
                 {
-                    Density = _density,
-                    Flow = flowSingleton.Blob
-                };
-                dependency = accumulateDensityJob.Schedule(dependency);
+                    AccumulateDensityJob accumulateDensityJob = new AccumulateDensityJob
+                    {
+                        DensityPtr = (int*)NativeArrayUnsafeUtility.GetUnsafePtr(_density),
+                        DensityLength = _density.Length,
+                        Flow = flowSingleton.Blob
+                    };
+                    dependency = accumulateDensityJob.ScheduleParallel(dependency);
+                }
 
                 BuildPressureJob buildPressureJob = new BuildPressureJob
                 {
@@ -238,9 +245,10 @@ namespace Project.Horde
         }
 
         [BurstCompile]
-        private partial struct AccumulateDensityJob : IJobEntity
+        private unsafe partial struct AccumulateDensityJob : IJobEntity
         {
-            public NativeArray<int> Density;
+            [NativeDisableUnsafePtrRestriction] public int* DensityPtr;
+            public int DensityLength;
             [ReadOnly] public BlobAssetReference<FlowFieldBlob> Flow;
 
             private void Execute(in LocalTransform transform, in ZombieTag tag)
@@ -253,7 +261,7 @@ namespace Project.Horde
                 }
 
                 int index = cell.x + (cell.y * flow.Width);
-                if (index < 0 || index >= Density.Length)
+                if (index < 0 || index >= DensityLength)
                 {
                     return;
                 }
@@ -263,7 +271,7 @@ namespace Project.Horde
                     return;
                 }
 
-                Density[index] = Density[index] + 1;
+                Interlocked.Increment(ref UnsafeUtility.AsRef<int>(DensityPtr + index));
             }
         }
 

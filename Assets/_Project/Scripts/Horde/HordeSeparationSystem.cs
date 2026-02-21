@@ -113,17 +113,23 @@ namespace Project.Horde
                 bool hasWallConfig = SystemAPI.TryGetSingleton(out WallRepulsionConfig wallConfig);
                 float referenceMoveSpeed = 1f;
                 float maxStep = referenceMoveSpeed * deltaTime;
-                float pressureMaxThisFrame = hasPressureConfig ? math.max(0f, pressureConfig.MaxPushPerFrame) * deltaTime : 0f;
+                float pressureMaxPushPerFrame = hasPressureConfig ? math.max(0f, pressureConfig.MaxPushPerFrame) : 0f;
+                float pressureSpeedFractionCap = hasPressureConfig ? math.clamp(pressureConfig.SpeedFractionCap, 0f, 1f) : 0f;
+                float pressureMaxFromConfig = pressureMaxPushPerFrame * deltaTime;
+                float pressureMaxFromSpeed = maxStep * pressureSpeedFractionCap;
+                float pressureMaxThisFrame = hasPressureConfig ? math.min(pressureMaxFromConfig, pressureMaxFromSpeed) : 0f;
                 float separationMaxThisFrame = math.max(0f, config.MaxPushPerFrame) * deltaTime;
                 float wallMaxThisFrame = hasWallConfig ? math.max(0f, wallConfig.MaxWallPushPerFrame) * deltaTime : 0f;
                 string order = "ZombieSteeringSystem -> HordePressureFieldSystem -> HordeSeparationSystem -> HordeHardSeparationSystem -> WallRepulsionSystem";
                 UnityEngine.Debug.Log(
                     $"[HordeRuntimeDiag] PressureEnabled={(hasPressureConfig ? pressureConfig.Enabled : (byte)0)} " +
                     $"DisablePairwiseWhenPressure={(hasPressureConfig ? pressureConfig.DisablePairwiseSeparationWhenPressureEnabled : (byte)0)} " +
+                    $"PressureMaxPushPerFrame={pressureMaxPushPerFrame:F3} PressureSpeedFractionCap={pressureSpeedFractionCap:F2} " +
                     $"SoftEnabled=1 SoftMaxNeighbors={config.MaxNeighbors} SoftIterations={config.Iterations} SoftMaxPushPerFrame={config.MaxPushPerFrame:F3} " +
                     $"HardEnabled={(hasHardConfig ? hardConfig.Enabled : (byte)0)} HardMaxNeighbors={(hasHardConfig ? hardConfig.MaxNeighbors : 0)} HardIterations={(hasHardConfig ? hardConfig.Iterations : 0)} " +
                     $"dt={deltaTime:F4} RefMoveSpeed={referenceMoveSpeed:F2} RefMaxStep={maxStep:F4} " +
-                    $"PressureMaxThisFrame={pressureMaxThisFrame:F4} SeparationMaxThisFrame={separationMaxThisFrame:F4} WallMaxThisFrame={wallMaxThisFrame:F4} " +
+                    $"PressureConfigBudgetThisFrame={pressureMaxFromConfig:F4} PressureSpeedBudgetThisFrame={pressureMaxFromSpeed:F4} PressureEffectiveCapThisFrame={pressureMaxThisFrame:F4} " +
+                    $"SeparationMaxThisFrame={separationMaxThisFrame:F4} WallMaxThisFrame={wallMaxThisFrame:F4} " +
                     $"Order={order}");
                 s_loggedRuntimeDiagnostics = true;
             }
@@ -173,7 +179,11 @@ namespace Project.Horde
 
             for (int iteration = 0; iteration < iterations; iteration++)
             {
-                _cellToIndex.Clear();
+                ClearSpatialGridJob clearGridJob = new ClearSpatialGridJob
+                {
+                    Grid = _cellToIndex
+                };
+                state.Dependency = clearGridJob.Schedule(state.Dependency);
 
                 BuildSpatialGridJob buildGridJob = new BuildSpatialGridJob
                 {
@@ -251,6 +261,17 @@ namespace Project.Horde
                 Entities[index] = entity;
                 Positions[index] = transform.Position.xy;
                 MoveSpeeds[index] = math.max(0f, moveSpeed.Value);
+            }
+        }
+
+        [BurstCompile]
+        private struct ClearSpatialGridJob : IJob
+        {
+            public NativeParallelMultiHashMap<int, int> Grid;
+
+            public void Execute()
+            {
+                Grid.Clear();
             }
         }
 

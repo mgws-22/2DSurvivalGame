@@ -703,3 +703,47 @@
 2. Cap to ~60 FPS and compare over equal wall-clock time; spreading/jamming should be qualitatively similar.
 3. Confirm one diagnostics log appears and includes `dt` plus computed frame budgets.
 4. Verify no blocked-cell residency after wall safety stage and `GC Alloc` remains `0 B`.
+
+## 2026-02-21 - HordeSeparation job safety fix for spatial grid clear
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordeSeparationSystem.cs`:
+  - replaced main-thread `_cellToIndex.Clear()` inside the iteration loop with a scheduled `ClearSpatialGridJob`.
+  - clear now runs in the same dependency chain before each `BuildSpatialGridJob`.
+
+### Why
+- `NativeParallelMultiHashMap` was being cleared on the main thread while a prior scheduled `BuildSpatialGridJob` still had write access, triggering `InvalidOperationException`.
+- The fix removes the race without adding `Complete()` or new sync points.
+
+### How to test
+1. Enter Play Mode with `HordeSeparationConfig.Iterations = 2`.
+2. Confirm the previous exception about `BuildSpatialGridJob.Grid` and `NativeParallelMultiHashMap.Clear()` no longer appears.
+3. Observe normal separation behavior and verify `GC Alloc` remains `0 B`.
+
+## 2026-02-21 - Pressure diag cap accuracy + thread-safe density accumulation
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordeSeparationSystem.cs` one-time runtime diagnostics:
+  - log now reports pressure budgets explicitly as:
+    - `PressureConfigBudgetThisFrame = MaxPushPerFrame * dt`
+    - `PressureSpeedBudgetThisFrame = RefMaxStep * SpeedFractionCap`
+    - `PressureEffectiveCapThisFrame = min(configBudget, speedBudget)`
+  - log also prints `PressureMaxPushPerFrame` and `PressureSpeedFractionCap` values from config.
+- Updated `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`:
+  - `AccumulateDensityJob` now uses atomic increment (`Interlocked.Increment` on density cell pointer via `UnsafeUtility.AsRef`) and is scheduled with `ScheduleParallel`.
+  - removes non-atomic read-modify-write (`Density[index] = Density[index] + 1`) race under high concurrency.
+- Updated docs:
+  - `Docs/Systems/Horde/HordePressureField.md`
+
+### Why
+- Pressure diagnostics needed to match the real runtime clamp so tuning is trustworthy.
+- Density accumulation needed to be thread-safe at high entity counts (20k+) while keeping Burst/jobs and zero per-frame allocations.
+
+### How to test
+1. Enter Play Mode and check the one-time `[HordeRuntimeDiag]` line.
+2. Verify:
+   - `PressureConfigBudgetThisFrame` and `PressureSpeedBudgetThisFrame` are printed.
+   - `PressureEffectiveCapThisFrame` equals their `min(...)`.
+   - with `dt≈0.022`, `RefMoveSpeed=1`, `SpeedFractionCap=0.25`, effective cap is near `0.0055` when config budget is larger.
+3. Stress with 5k+ to 20k+ entities and confirm pressure density behavior is stable (no obvious random undercount artifacts).
+4. Profile and confirm `GC Alloc` remains `0 B`.
