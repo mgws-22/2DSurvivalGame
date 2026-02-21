@@ -19,13 +19,13 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
 4. Optional bounded blur passes (`0..2`) smooth pressure to reduce jitter and improve corridor behavior.
 5. Per zombie, samples local pressure gradient and pushes toward lower pressure.
 6. Adds deterministic per-entity spread bias in tie/symmetry cases so dense stacks do not move in perfect lockstep.
-7. Constrains pressure direction so it does not strongly oppose local flow-to-center direction.
+7. Removes any backward component vs flow direction (`dot(pressureDir, flowDir) < 0` projected out).
 8. Push is speed-capped: `min(MaxPushPerFrame, moveSpeed * dt * SpeedFractionCap)`.
 9. Rejects pressure move if resulting position lands in a blocked expanded flow cell.
 
 ## Update Order
 - Runs after `ZombieSteeringSystem`.
-- Runs before `HordeSeparationSystem` / `HordeHardSeparationSystem`.
+- Runs before `HordeSeparationSystem`, which runs before `HordeHardSeparationSystem`.
 - Runs before `WallRepulsionSystem`.
 - `WallRepulsionSystem` remains the final blocked-cell safety correction.
 

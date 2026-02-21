@@ -10,6 +10,8 @@ using Unity.Transforms;
 namespace Project.Horde
 {
     [UpdateInGroup(typeof(SimulationSystemGroup))]
+    [UpdateAfter(typeof(HordePressureFieldSystem))]
+    [UpdateAfter(typeof(HordeSeparationSystem))]
     [UpdateAfter(typeof(ZombieSteeringSystem))]
     [UpdateBefore(typeof(WallRepulsionSystem))]
     public partial struct HordeHardSeparationSystem : ISystem

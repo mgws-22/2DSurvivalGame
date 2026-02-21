@@ -639,3 +639,39 @@
 2. Verify units still spread under congestion but overall trajectories remain center-seeking and natural.
 3. Confirm no long straight "force-field" lanes are formed in open areas.
 4. Profile and confirm `GC Alloc` remains `0 B`.
+
+## 2026-02-21 - Pressure+separation augment mode lock-in + runtime diagnostics
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordeSeparationSystem.cs`:
+  - removed pressure-based auto-skip gating; pressure no longer disables soft separation.
+  - removed hard-solver skip gating so soft and hard separation can run in the same frame when configured.
+  - set deterministic order attributes to run after pressure and before hard separation.
+  - restored conservative soft defaults (`Radius=0.05`, `CellSizeFactor=1.25`, `InfluenceRadiusFactor=1.5`, `SeparationStrength=0.7`, `MaxPushPerFrame=0.12`, `MaxNeighbors=24`).
+  - added one-time Editor/Development runtime diagnostics log with pressure/soft/hard active flags and effective order.
+- Updated `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`:
+  - kept augment default (`DisablePairwiseSeparationWhenPressureEnabled=0`).
+  - set conservative default pressure cap (`SpeedFractionCap=0.25`).
+  - pressure anti-backtrack now uses projection rule: remove only negative component vs `flowDir`.
+- Updated separation/wall ordering:
+  - `Assets/_Project/Scripts/Horde/HordeHardSeparationSystem.cs` now runs after pressure + soft separation.
+  - `Assets/_Project/Scripts/Horde/WallRepulsionSystem.cs` explicitly runs after pressure + soft + hard as final wall safety.
+- Updated docs:
+  - `Docs/Systems/Horde/HordePressureField.md`
+  - `Docs/Systems/Horde/HordeSeparation.md`
+  - `Docs/Systems/Horde/HordeHardSeparation.md`
+  - `Docs/Systems/Horde/WallRepulsion.md`
+
+### Why
+- Needed strict augment behavior: pressure is macro decongestion, separation remains micro contact resolution.
+- Needed deterministic update ordering to avoid perceived "systems fighting".
+- Needed runtime truth visibility (one log) to confirm active toggles and ordering during Play.
+
+### How to test
+1. Enter Play Mode in `Assets/Scenes/SampleScene.unity`.
+2. Confirm one diagnostics log appears once in Console and includes pressure/soft/hard states plus order.
+3. With 200+ then 5k+ units, verify:
+   - pressure and separation both visibly contribute,
+   - movement remains center-driven (no strong backward pressure drift),
+   - units do not remain inside blocked cells after wall safety stage.
+4. Profile gameplay and confirm `GC Alloc` remains `0 B`.

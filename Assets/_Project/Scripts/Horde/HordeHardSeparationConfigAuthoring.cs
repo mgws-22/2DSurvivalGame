@@ -8,7 +8,7 @@ namespace Project.Horde
     public sealed class HordeHardSeparationConfigAuthoring : MonoBehaviour
     {
         [SerializeField] private bool _enabled;
-        [Min(0.001f)] [SerializeField] private float _radius = 0.05f;
+        [Min(0.001f)] [SerializeField] private float _radius = 0.1f;
         [Min(0.001f)] [SerializeField] private float _cellSize = 0.1f;
         [Min(1)] [SerializeField] private int _maxNeighbors = 28;
         [Min(1)] [SerializeField] private int _iterations = 2;

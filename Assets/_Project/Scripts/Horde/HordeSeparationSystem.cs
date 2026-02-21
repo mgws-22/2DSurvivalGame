@@ -9,10 +9,12 @@ using Unity.Transforms;
 namespace Project.Horde
 {
     [UpdateInGroup(typeof(SimulationSystemGroup))]
+    [UpdateAfter(typeof(HordePressureFieldSystem))]
     [UpdateAfter(typeof(ZombieSteeringSystem))]
+    [UpdateBefore(typeof(HordeHardSeparationSystem))]
     public partial struct HordeSeparationSystem : ISystem
     {
-        private static bool s_loggedSkipDueToHardSolver;
+        private static bool s_loggedRuntimeDiagnostics;
         private EntityQuery _zombieQuery;
         private NativeList<Entity> _entities;
         private NativeList<float2> _positionsA;
@@ -44,12 +46,12 @@ namespace Project.Horde
                 Entity configEntity = state.EntityManager.CreateEntity(typeof(HordeSeparationConfig));
                 state.EntityManager.SetComponentData(configEntity, new HordeSeparationConfig
                 {
-                    Radius = 0.2f,
-                    CellSizeFactor = 10f,
-                    InfluenceRadiusFactor = 2f,
-                    SeparationStrength = 150f,
-                    MaxPushPerFrame = 10f,
-                    MaxNeighbors = 28,
+                    Radius = 0.1f,
+                    CellSizeFactor = 1.25f,
+                    InfluenceRadiusFactor = 1.5f,
+                    SeparationStrength = 0.7f,
+                    MaxPushPerFrame = 0.12f,
+                    MaxNeighbors = 24,
                     Iterations = 1
 
                 });
@@ -86,23 +88,23 @@ namespace Project.Horde
 
         public void OnUpdate(ref SystemState state)
         {
-            if (SystemAPI.TryGetSingleton(out HordeHardSeparationConfig hardConfig) && hardConfig.Enabled != 0)
-            {
-                if (!s_loggedSkipDueToHardSolver)
-                {
-                    UnityEngine.Debug.Log("HordeSeparationSystem skipped because HordeHardSeparationConfig.Enabled != 0.");
-                    s_loggedSkipDueToHardSolver = true;
-                }
+            HordeSeparationConfig config = SystemAPI.GetSingleton<HordeSeparationConfig>();
 
-                return;
-            }
-
-            if (SystemAPI.TryGetSingleton(out HordePressureConfig pressureConfig) &&
-                pressureConfig.Enabled != 0 &&
-                pressureConfig.DisablePairwiseSeparationWhenPressureEnabled != 0)
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (!s_loggedRuntimeDiagnostics)
             {
-                return;
+                bool hasPressureConfig = SystemAPI.TryGetSingleton(out HordePressureConfig pressureConfig);
+                bool hasHardConfig = SystemAPI.TryGetSingleton(out HordeHardSeparationConfig hardConfig);
+                string order = "ZombieSteeringSystem -> HordePressureFieldSystem -> HordeSeparationSystem -> HordeHardSeparationSystem -> WallRepulsionSystem";
+                UnityEngine.Debug.Log(
+                    $"[HordeRuntimeDiag] PressureEnabled={(hasPressureConfig ? pressureConfig.Enabled : (byte)0)} " +
+                    $"DisablePairwiseWhenPressure={(hasPressureConfig ? pressureConfig.DisablePairwiseSeparationWhenPressureEnabled : (byte)0)} " +
+                    $"SoftEnabled=1 SoftMaxNeighbors={config.MaxNeighbors} SoftIterations={config.Iterations} SoftMaxPushPerFrame={config.MaxPushPerFrame:F3} " +
+                    $"HardEnabled={(hasHardConfig ? hardConfig.Enabled : (byte)0)} HardMaxNeighbors={(hasHardConfig ? hardConfig.MaxNeighbors : 0)} HardIterations={(hasHardConfig ? hardConfig.Iterations : 0)} " +
+                    $"Order={order}");
+                s_loggedRuntimeDiagnostics = true;
             }
+#endif
 
             int count = _zombieQuery.CalculateEntityCount();
             if (count <= 1)
@@ -110,7 +112,6 @@ namespace Project.Horde
                 return;
             }
 
-            HordeSeparationConfig config = SystemAPI.GetSingleton<HordeSeparationConfig>();
             float radius = math.max(0.001f, config.Radius);
             float minDist = radius * 2f;
             float cellSize = minDist * math.max(0.5f, config.CellSizeFactor);

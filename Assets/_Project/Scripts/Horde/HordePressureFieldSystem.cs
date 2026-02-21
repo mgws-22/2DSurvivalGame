@@ -38,11 +38,11 @@ namespace Project.Horde
                 state.EntityManager.SetComponentData(configEntity, new HordePressureConfig
                 {
                     Enabled = 1,
-                    TargetUnitsPerCell = 2.5f,
-                    PressureStrength = 3f,
+                    TargetUnitsPerCell = 2f,
+                    PressureStrength = 10f,
                     MaxPushPerFrame = 0.4f,
                     SpeedFractionCap = 0.4f,
-                    BlockedCellPenalty = 6f,
+                    BlockedCellPenalty = 3f,
                     FieldUpdateIntervalFrames = 1,
                     BlurPasses = 1,
                     DisablePairwiseSeparationWhenPressureEnabled = 0
@@ -389,7 +389,7 @@ namespace Project.Horde
                 }
 
                 float2 flowDirection = ResolveFlowDirection(index, position, ref flow);
-                direction = ConstrainAgainstFlow(direction, flowDirection, entityIndex);
+                direction = RemoveBackwardComponent(direction, flowDirection);
                 dirLenSq = math.lengthsq(direction);
                 if (dirLenSq <= Epsilon)
                 {
@@ -544,7 +544,7 @@ namespace Project.Horde
                 return toCenter * math.rsqrt(lenSq);
             }
 
-            private static float2 ConstrainAgainstFlow(float2 direction, float2 flowDirection, int entityIndex)
+            private static float2 RemoveBackwardComponent(float2 direction, float2 flowDirection)
             {
                 float flowLenSq = math.lengthsq(flowDirection);
                 if (flowLenSq <= Epsilon)
@@ -554,26 +554,13 @@ namespace Project.Horde
 
                 float2 flowN = flowDirection * math.rsqrt(flowLenSq);
                 float flowDot = math.dot(direction, flowN);
-                if (flowDot >= -0.15f)
+                if (flowDot >= 0f)
                 {
                     return direction;
                 }
 
-                float2 constrained = direction - (flowN * flowDot);
-                float constrainedLenSq = math.lengthsq(constrained);
-                if (constrainedLenSq <= Epsilon)
-                {
-                    float2 lateral = new float2(-flowN.y, flowN.x);
-                    uint h = (uint)entityIndex * 0x9E3779B9u;
-                    if ((h & 1u) == 0u)
-                    {
-                        lateral = -lateral;
-                    }
-
-                    return lateral;
-                }
-
-                return constrained;
+                // Remove only the backwards component along flow to avoid pressure driving away from the goal.
+                return direction - (flowN * flowDot);
             }
 
             private static float2 DeterministicUnitDir(int entityIndex, int2 cell)

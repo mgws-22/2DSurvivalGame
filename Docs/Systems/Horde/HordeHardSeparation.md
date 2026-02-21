@@ -30,7 +30,7 @@ Per frame when enabled:
 - Compute pass is race-free: each worker writes only `delta[i]`.
 - No per-frame managed allocations in hot path.
 - Neighbor work is bounded by `MaxNeighbors`.
-- Update order: after `ZombieSteeringSystem`, before `WallRepulsionSystem`.
+- Update order: after `ZombieSteeringSystem` + `HordePressureFieldSystem` + `HordeSeparationSystem`, before `WallRepulsionSystem`.
 
 ## Performance
 - Burst jobs for snapshot, grid build, delta solve, apply, and writeback.

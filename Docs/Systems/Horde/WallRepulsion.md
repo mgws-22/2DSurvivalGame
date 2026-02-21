@@ -23,6 +23,7 @@ Prevent zombies from being pushed into blocked map tiles under crowd pressure by
 - Projection uses nearest point inside walkable cells (not center snap) to avoid corner launch/teleport artifacts.
 - No Unity Physics colliders/rigidbodies required.
 - Allocation-free per frame in hot path.
+- Runs after pressure and both separation passes as final wall safety stage.
 
 ## Verification
 1. Enter Play Mode and generate heavy crowd pressure near narrow corridors.

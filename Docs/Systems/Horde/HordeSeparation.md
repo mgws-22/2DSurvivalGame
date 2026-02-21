@@ -11,8 +11,6 @@ Prevent zombie overlap at high entity counts without Unity Physics by applying g
 
 ## Algorithm
 Per frame:
-1. If `HordeHardSeparationConfig` exists and `Enabled != 0`, skip this system (soft + hard do not run together).
-1. If `HordePressureConfig.Enabled != 0` and `DisablePairwiseSeparationWhenPressureEnabled != 0`, skip soft pairwise separation.
 1. Snapshot zombie entities and positions.
 2. Build uniform spatial hash grid (`NativeParallelMultiHashMap<int,int>`).
 3. For each zombie, inspect only 3x3 neighbor cells.
@@ -36,11 +34,11 @@ Optional second pass is supported via `Iterations` (clamped to `1..2`).
 
 ## Invariants
 - Only zombies are moved by separation.
-- Missing hard-separation config is treated as hard solver disabled, so soft separation still runs.
-- Pressure mode can disable this system entirely to favor `O(N + G)` field-based congestion control.
+- Pressure config does not disable soft separation; pressure is augment-only.
 - No per-frame managed allocations.
 - No `O(N^2)` all-pairs scan.
 - Soft displacement from separation is tied to each zombie's `ZombieMoveSpeed`.
+- Update order: after `ZombieSteeringSystem` + `HordePressureFieldSystem`, before `HordeHardSeparationSystem`.
 
 ## Performance
 - Burst jobs for snapshot, grid build, separation, and writeback.

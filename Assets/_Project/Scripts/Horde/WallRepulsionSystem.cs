@@ -8,7 +8,9 @@ using Unity.Transforms;
 namespace Project.Horde
 {
     [UpdateInGroup(typeof(SimulationSystemGroup))]
+    [UpdateAfter(typeof(HordePressureFieldSystem))]
     [UpdateAfter(typeof(HordeSeparationSystem))]
+    [UpdateAfter(typeof(HordeHardSeparationSystem))]
     public partial struct WallRepulsionSystem : ISystem
     {
         public void OnCreate(ref SystemState state)

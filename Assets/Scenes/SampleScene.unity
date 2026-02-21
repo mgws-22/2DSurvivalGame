@@ -373,7 +373,7 @@ MonoBehaviour:
   _zombiePrefab: {fileID: 2940900018987325336, guid: 4272358af0497654bbe12dbc757acdf4, type: 3}
   _spawnRate: 22
   _spawnBatchSize: 222
-  _maxAlive: 22222
+  _maxAlive: 2222
   _seed: 12345
 --- !u!4 &1862250333
 Transform:
@@ -403,7 +403,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Project.Horde.HordeHardSeparationConfigAuthoring
   _enabled: 1
-  _radius: 0.4
+  _radius: 0.1
   _cellSize: 0.1
   _maxNeighbors: 28
   _iterations: 2
