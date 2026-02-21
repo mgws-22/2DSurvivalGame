@@ -911,3 +911,68 @@
 4. Profiler watchlist:
    - gameplay `GC Alloc = 0 B`
    - no new `Complete()` sync spikes.
+
+## 2026-02-21 - ECS perf warnings cleanup (cached queries/lookups) + metrics OOB hardening
+
+### What changed
+- Updated `Assets/_Project/Scripts/Map/WallFieldBuildSystem.cs`:
+  - moved map/wall singleton `EntityQuery` creation to `OnCreate`.
+  - `OnUpdate` now reuses cached queries (no per-frame query creation).
+- Updated `Assets/_Project/Scripts/Horde/ZombieSteeringSystem.cs`:
+  - moved `BufferLookup<PressureCell>` creation to `OnCreate`.
+  - `OnUpdate` now calls `_pressureLookup.Update(ref state)` and reuses cached lookup.
+- Updated `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`:
+  - moved writable `BufferLookup<PressureCell>` creation to `OnCreate`.
+  - `OnUpdate` now calls `_pressureLookup.Update(ref state)` and reuses cached lookup for publish job.
+  - cached pressure-buffer singleton query and reused it in `OnUpdate`.
+- Updated `Assets/_Project/Scripts/Horde/HordeTuningQuickMetricsSystem.cs`:
+  - moved read-only `BufferLookup<PressureCell>` creation to `OnCreate` and refresh with `.Update(ref state)` in `OnUpdate`.
+  - hardened per-thread counter capacity validation to recreate arrays if thread count or array lengths drift.
+  - `ClearThreadCountersJob` uses actual array length and includes histogram bounds guard.
+- Updated docs:
+  - `Docs/Systems/Horde/ZombieSteering.md`
+  - `Docs/Systems/Horde/HordePressureField.md`
+  - `Docs/Systems/Horde/HordeTuningQuickMetrics.md`
+  - `Docs/Systems/Map/MapGenerator.md`
+
+### Why
+- Removes Entities performance warnings about creating queries/lookups in `OnUpdate`.
+- Prevents Burst-side out-of-range in `ClearThreadCountersJob` when thread-counter array sizes desync.
+- Keeps scheduling fully dependency-chained with zero `Complete()` sync points.
+
+### How to test
+1. Enter Play Mode in `Assets/Scenes/SampleScene.unity`.
+2. Verify no warnings about:
+   - `WallFieldBuildSystem` creating query in `OnUpdate`.
+   - `ZombieSteeringSystem` / `HordePressureFieldSystem` creating lookup in `OnUpdate`.
+3. Verify no Burst `IndexOutOfRangeException` in `ClearThreadCountersJob`.
+4. Profiler watchlist:
+   - gameplay `GC Alloc = 0 B`
+   - no new main-thread sync spikes.
+
+## 2026-02-21 - Metrics safety fix: remove PressureCell buffer access from Burst parallel job
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordeTuningQuickMetricsSystem.cs`:
+  - removed `DynamicBuffer<PressureCell>` / `BufferLookup<PressureCell>` access from `EvaluateQuickMetricsJob`.
+  - backpressure metrics now use a density proxy computed from sampled local neighbors:
+    - `density = 1 + localNeighbors`
+    - `pressureProxy = max(0, density - TargetUnitsPerCell)`
+    - `excess = max(0, pressureProxy - BackpressureThreshold)`
+  - split counter clearing into two jobs:
+    - `ClearScalarCountersJob` (`IJobParallelFor`) for scalar/thread counters.
+    - `ClearHistogramJob` (`IJobParallelFor`) for flat histogram clear.
+  - kept reduction in `ReduceQuickMetricsJob` with `WorkerCount * HistogramBins` source length and `ReducedHistogram` bin count.
+  - updated runtime log format to label backpressure as density-proxy:
+    - `backpressure(densityProxyThreshold=..., k=..., active=...%)`
+- Updated docs:
+  - `Docs/Systems/Horde/HordeTuningQuickMetrics.md`
+
+### Why
+- Avoids Burst safety exceptions (`ReadWriteBuffers are restricted...`) caused by dynamic buffer access patterns in parallel metrics jobs.
+- Keeps metrics parallel, Burst-compatible, allocation-free in hot path, and without adding `Complete()` sync points.
+
+### How to test
+1. Enter Play Mode with metrics enabled.
+2. Verify no Burst abort / `ReadWriteBuffers` exception in `HordeTuningQuickMetricsSystem`.
+3. Confirm `[HordeTune]` logs still print speed stats (`avg/p50/p90`) and backpressure (`active%`, `avgScale`, `minScale`) with `densityProxyThreshold`.

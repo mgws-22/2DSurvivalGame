@@ -14,7 +14,11 @@ Provide low-overhead runtime tuning metrics (sampled overlap and jam rates) so c
 1. Runs after `WallRepulsionSystem` so metrics reflect final resolved positions.
 2. Every `LogEveryNFrames`, snapshots zombie entities/positions/speeds.
 3. Builds a spatial hash grid and evaluates only sampled zombies (`EntityIndexInQuery % SampleStride == 0`).
-4. Samples local pressure from the published pressure buffer inside `EvaluateQuickMetricsJob` via read-only `BufferLookup<PressureCell>` and evaluates the same backpressure scale formula used by steering.
+4. Computes a metrics-only density proxy from local neighbor count and evaluates backpressure scale in job:
+   - `density = 1 + localNeighbors`
+   - `pressureProxy = max(0, density - TargetUnitsPerCell)`
+   - `excess = max(0, pressureProxy - BackpressureThreshold)`
+   - `speedScale = clamp(1 / (1 + BackpressureK * excess), MinSpeedFactor, MaxSpeedFactor)`
 5. `overlap(sample)%`:
    - sampled zombie counts as overlap if any nearby neighbor is closer than `2 * Radius`.
 6. `jam%` (cheap approximation):
@@ -35,9 +39,10 @@ Provide low-overhead runtime tuning metrics (sampled overlap and jam rates) so c
 - No per-frame managed allocations in gameplay hot path.
 - No explicit `Complete()` calls.
 - Uses Burst jobs and persistent native containers.
-- `PressureCell` is never read on main thread.
 - Sampling is deterministic (`EntityIndexInQuery` stride).
 - Histogram and all thread accumulators are persistent native arrays (no per-tick allocations).
+- Thread counter arrays are resized only when `JobsUtility.MaxJobThreadCount` changes, then reused.
+- No `DynamicBuffer<PressureCell>` dependency in metrics jobs.
 
 ## Performance
 - Metrics run only at configured interval (default every 60 frames).
@@ -48,7 +53,7 @@ Provide low-overhead runtime tuning metrics (sampled overlap and jam rates) so c
 ## Verification
 1. Enter Play Mode and confirm one startup config log appears: `[HordeTune] cfg ...`.
 2. Confirm periodic logs appear:
-   - `[HordeTune] logIntervalSeconds=... simDt=... sampled=... overlap=... jam=... speed(... ) frac(... ) backpressure(... ) sepCapFrame=... pressureCapFrame=...`
+   - `[HordeTune] logIntervalSeconds=... simDt=... sampled=... overlap=... jam=... speed(... ) frac(... ) backpressure(densityProxyThreshold=... k=... active=... avgScale=... minScale=...) ...`
 3. Verify `sepCap > pressureCap` with current tuning.
 4. Verify `backpressure(active=...)` stays low in open flow and rises in chokepoint jams.
 5. Confirm Profiler `GC Alloc` remains `0 B` in gameplay loop.

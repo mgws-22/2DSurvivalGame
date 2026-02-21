@@ -29,6 +29,8 @@ namespace Project.Horde
         private int _frameIndex;
         private byte _activePressureBuffer;
         private Entity _pressureFieldEntity;
+        private EntityQuery _pressureBufferQuery;
+        private BufferLookup<PressureCell> _pressureLookup;
 
         public void OnCreate(ref SystemState state)
         {
@@ -75,14 +77,14 @@ namespace Project.Horde
                 });
             }
 
-            EntityQuery pressureBufferQuery = state.GetEntityQuery(ComponentType.ReadWrite<PressureFieldBufferTag>());
-            if (pressureBufferQuery.IsEmptyIgnoreFilter)
+            _pressureBufferQuery = state.GetEntityQuery(ComponentType.ReadWrite<PressureFieldBufferTag>());
+            if (_pressureBufferQuery.IsEmptyIgnoreFilter)
             {
                 _pressureFieldEntity = state.EntityManager.CreateEntity(typeof(PressureFieldBufferTag));
             }
             else
             {
-                _pressureFieldEntity = pressureBufferQuery.GetSingletonEntity();
+                _pressureFieldEntity = _pressureBufferQuery.GetSingletonEntity();
             }
 
             if (!state.EntityManager.HasBuffer<PressureCell>(_pressureFieldEntity))
@@ -90,6 +92,7 @@ namespace Project.Horde
                 state.EntityManager.AddBuffer<PressureCell>(_pressureFieldEntity);
             }
 
+            _pressureLookup = state.GetBufferLookup<PressureCell>(false);
             state.RequireForUpdate<HordePressureConfig>();
         }
 
@@ -201,20 +204,20 @@ namespace Project.Horde
             int fieldInterval = math.clamp(config.FieldUpdateIntervalFrames, 1, 8);
             int blurPasses = math.clamp(config.BlurPasses, 0, 2);
             bool shouldRebuild = resized || ((_frameIndex % fieldInterval) == 0);
+            _pressureLookup.Update(ref state);
 
             JobHandle dependency = state.Dependency;
             NativeArray<float> activePressure = _activePressureBuffer == 0 ? _pressureA : _pressureB;
 
             if (_pressureFieldEntity == Entity.Null || !state.EntityManager.Exists(_pressureFieldEntity))
             {
-                EntityQuery pressureBufferQuery = state.GetEntityQuery(ComponentType.ReadWrite<PressureFieldBufferTag>());
-                if (pressureBufferQuery.IsEmptyIgnoreFilter)
+                if (_pressureBufferQuery.IsEmptyIgnoreFilter)
                 {
                     _pressureFieldEntity = state.EntityManager.CreateEntity(typeof(PressureFieldBufferTag));
                 }
                 else
                 {
-                    _pressureFieldEntity = pressureBufferQuery.GetSingletonEntity();
+                    _pressureFieldEntity = _pressureBufferQuery.GetSingletonEntity();
                 }
 
                 if (!state.EntityManager.HasBuffer<PressureCell>(_pressureFieldEntity))
@@ -286,11 +289,10 @@ namespace Project.Horde
                     pressureBuffer.ResizeUninitialized(cellCount);
                 }
 
-                BufferLookup<PressureCell> pressureLookup = state.GetBufferLookup<PressureCell>(false);
                 PublishPressureToBufferJob publishPressureJob = new PublishPressureToBufferJob
                 {
                     Source = activePressure,
-                    PressureLookup = pressureLookup,
+                    PressureLookup = _pressureLookup,
                     PressureEntity = _pressureFieldEntity
                 };
                 dependency = publishPressureJob.Schedule(dependency);

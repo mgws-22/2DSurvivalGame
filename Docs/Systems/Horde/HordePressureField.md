@@ -55,6 +55,7 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
 - Uses persistent `NativeArray` buffers reused across frames.
 - No structural entity changes and no manual sync points.
 - No `Complete()` sync points; publish copy stays scheduled/jobified.
+- Pressure publish lookup is created in `OnCreate` and updated per frame (`.Update(ref state)`), avoiding per-frame lookup creation overhead.
 
 ## Verification
 1. Enter Play Mode in `Assets/Scenes/SampleScene.unity` with large spawn counts.

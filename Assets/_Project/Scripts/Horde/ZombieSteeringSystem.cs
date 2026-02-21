@@ -12,6 +12,7 @@ namespace Project.Horde
     public partial struct ZombieSteeringSystem : ISystem
     {
         private const byte NoneDirection = 255;
+        private BufferLookup<PressureCell> _pressureLookup;
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
@@ -20,6 +21,7 @@ namespace Project.Horde
             state.RequireForUpdate<FlowFieldSingleton>();
             state.RequireForUpdate<ZombieTag>();
             state.RequireForUpdate<HordePressureConfig>();
+            _pressureLookup = state.GetBufferLookup<PressureCell>(true);
         }
 
         [BurstCompile]
@@ -41,7 +43,7 @@ namespace Project.Horde
             HordePressureConfig pressureConfig = SystemAPI.GetSingleton<HordePressureConfig>();
             Entity pressureFieldEntity = Entity.Null;
             bool hasPressureFieldEntity = SystemAPI.TryGetSingletonEntity<PressureFieldBufferTag>(out pressureFieldEntity);
-            BufferLookup<PressureCell> pressureLookup = state.GetBufferLookup<PressureCell>(true);
+            _pressureLookup.Update(ref state);
 
             float backpressureThreshold = math.max(0f, pressureConfig.BackpressureThreshold);
             float backpressureK = math.max(0f, pressureConfig.BackpressureK);
@@ -57,7 +59,7 @@ namespace Project.Horde
                 DeltaTime = deltaTime,
                 MapData = mapData,
                 Flow = flowSingleton.Blob,
-                PressureLookup = pressureLookup,
+                PressureLookup = _pressureLookup,
                 PressureFieldEntity = pressureFieldEntity,
                 HasPressureFieldEntity = hasPressureFieldEntity ? (byte)1 : (byte)0,
                 PressureEnabled = pressureConfig.Enabled,

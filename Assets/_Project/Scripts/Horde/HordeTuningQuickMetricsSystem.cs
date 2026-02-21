@@ -204,6 +204,8 @@ namespace Project.Horde
 
         public void OnUpdate(ref SystemState state)
         {
+            EnsureThreadCounterCapacity(ref state);
+
             HordeTuningQuickConfig quickConfig = SystemAPI.GetSingleton<HordeTuningQuickConfig>();
             if (quickConfig.Enabled == 0)
             {
@@ -247,12 +249,13 @@ namespace Project.Horde
                 float overlapPct = metrics.Sampled > 0 ? (100f * metrics.OverlapHits / metrics.Sampled) : 0f;
                 float jamPct = metrics.Sampled > 0 ? (100f * metrics.JamHits / metrics.Sampled) : 0f;
                 float activeBackpressurePct = metrics.Sampled > 0 ? (100f * metrics.BackpressureActiveHits / metrics.Sampled) : 0f;
+                float densityProxyThreshold = math.max(0f, pressureConfig.TargetUnitsPerCell + pressureConfig.BackpressureThreshold);
 
                 UnityEngine.Debug.Log(
                     $"[HordeTune] logIntervalSeconds={logIntervalSeconds:F4} simDt={simDt:F4} sampled={metrics.Sampled} overlap={overlapPct:F1}% jam={jamPct:F1}% " +
                     $"speed(avg={metrics.AvgSpeed:F2} p50={metrics.P50Speed:F2} p90={metrics.P90Speed:F2} min={metrics.MinSpeed:F2} max={metrics.MaxSpeed:F2}) " +
                     $"frac(avg={metrics.AvgSpeedFraction:F2}) " +
-                    $"backpressure(active={activeBackpressurePct:F1}% avgScale={metrics.AvgSpeedScale:F2} minScale={metrics.MinSpeedScale:F2}) " +
+                    $"backpressure(densityProxyThreshold={densityProxyThreshold:F2} k={pressureConfig.BackpressureK:F2} active={activeBackpressurePct:F1}% avgScale={metrics.AvgSpeedScale:F2} minScale={metrics.MinSpeedScale:F2}) " +
                     $"sepCapFrame={separationCap:F4} pressureCapFrame={pressureEffectiveCap:F4} " +
                     $"sepMaxPushPerFrame={separationConfig.MaxPushPerFrame:F3} pressureMaxPushPerFrame={pressureConfig.MaxPushPerFrame:F3} pressureSpeedFractionCap={pressureConfig.SpeedFractionCap:F2} " +
                     $"backpressureThreshold={pressureConfig.BackpressureThreshold:F2} backpressureK={pressureConfig.BackpressureK:F2} " +
@@ -303,16 +306,13 @@ namespace Project.Horde
                 return;
             }
 
-            Entity pressureFieldEntity = Entity.Null;
-            bool hasPressureFieldEntity = SystemAPI.TryGetSingletonEntity<PressureFieldBufferTag>(out pressureFieldEntity);
-            BufferLookup<PressureCell> pressureLookup = state.GetBufferLookup<PressureCell>(true);
-
             EnsureCapacity(count, sampleStride);
             _entities.ResizeUninitialized(count);
             _positions.ResizeUninitialized(count);
             _moveSpeeds.ResizeUninitialized(count);
 
             JobHandle dependency = state.Dependency;
+            int threadLen = _sampledPerThread.Length;
 
             GatherZombieSnapshotJob gatherJob = new GatherZombieSnapshotJob
             {
@@ -336,7 +336,7 @@ namespace Project.Horde
             };
             dependency = buildGridJob.Schedule(count, 128, dependency);
 
-            ClearThreadCountersJob clearCountersJob = new ClearThreadCountersJob
+            ClearScalarCountersJob clearScalarJob = new ClearScalarCountersJob
             {
                 Sampled = _sampledPerThread,
                 Overlap = _overlapPerThread,
@@ -348,11 +348,15 @@ namespace Project.Horde
                 SpeedScaleSum = _speedScaleSumPerThread,
                 SpeedMin = _speedMinPerThread,
                 SpeedMax = _speedMaxPerThread,
-                SpeedScaleMin = _speedScaleMinPerThread,
-                SpeedHistogram = _speedHistogramPerThread,
-                HistogramBins = SpeedHistogramBins
+                SpeedScaleMin = _speedScaleMinPerThread
             };
-            dependency = clearCountersJob.Schedule(_workerCount, 64, dependency);
+            dependency = clearScalarJob.Schedule(threadLen, 64, dependency);
+
+            ClearHistogramJob clearHistogramJob = new ClearHistogramJob
+            {
+                SpeedHistogram = _speedHistogramPerThread
+            };
+            dependency = clearHistogramJob.Schedule(_speedHistogramPerThread.Length, 256, dependency);
 
             EvaluateQuickMetricsJob evaluateJob = new EvaluateQuickMetricsJob
             {
@@ -373,10 +377,6 @@ namespace Project.Horde
                 SpeedMaxPerThread = _speedMaxPerThread,
                 SpeedScaleMinPerThread = _speedScaleMinPerThread,
                 SpeedHistogramPerThread = _speedHistogramPerThread,
-                PressureLookup = pressureLookup,
-                PressureFieldEntity = pressureFieldEntity,
-                HasPressureFieldEntity = hasPressureFieldEntity ? (byte)1 : (byte)0,
-                Flow = flowSingleton.Blob,
                 InvCellSize = invCellSize,
                 MinDistSq = minDistSq,
                 InfluenceRadiusSq = influenceRadiusSq,
@@ -392,7 +392,7 @@ namespace Project.Horde
                 MinSpeedFactor = minSpeedFactor,
                 MaxSpeedFactor = maxSpeedFactor,
                 PressureEnabled = pressureConfig.Enabled,
-                WorkerCount = _workerCount
+                WorkerCount = threadLen
             };
             dependency = evaluateJob.Schedule(count, 128, dependency);
 
@@ -417,7 +417,7 @@ namespace Project.Horde
                 Dt = dtWindowForSpeed,
                 HistogramBins = SpeedHistogramBins,
                 SpeedHistogramMax = SpeedHistogramMax,
-                WorkerCount = _workerCount
+                WorkerCount = threadLen
             };
             dependency = reduceJob.Schedule(dependency);
 
@@ -466,6 +466,91 @@ namespace Project.Horde
             _ = sampleStride;
         }
 
+        private void EnsureThreadCounterCapacity(ref SystemState state)
+        {
+            int desired = math.max(1, JobsUtility.MaxJobThreadCount);
+            bool recreateAllThreadArrays =
+                desired != _workerCount ||
+                !_sampledPerThread.IsCreated ||
+                _sampledPerThread.Length != desired ||
+                !_overlapPerThread.IsCreated ||
+                _overlapPerThread.Length != desired ||
+                !_jamPerThread.IsCreated ||
+                _jamPerThread.Length != desired ||
+                !_speedSamplesPerThread.IsCreated ||
+                _speedSamplesPerThread.Length != desired ||
+                !_backpressureActivePerThread.IsCreated ||
+                _backpressureActivePerThread.Length != desired ||
+                !_speedSumPerThread.IsCreated ||
+                _speedSumPerThread.Length != desired ||
+                !_speedFractionSumPerThread.IsCreated ||
+                _speedFractionSumPerThread.Length != desired ||
+                !_speedScaleSumPerThread.IsCreated ||
+                _speedScaleSumPerThread.Length != desired ||
+                !_speedMinPerThread.IsCreated ||
+                _speedMinPerThread.Length != desired ||
+                !_speedMaxPerThread.IsCreated ||
+                _speedMaxPerThread.Length != desired ||
+                !_speedScaleMinPerThread.IsCreated ||
+                _speedScaleMinPerThread.Length != desired ||
+                !_speedHistogramPerThread.IsCreated ||
+                _speedHistogramPerThread.Length != (desired * SpeedHistogramBins);
+
+            if (recreateAllThreadArrays)
+            {
+                JobHandle disposeHandle = state.Dependency;
+                disposeHandle = DisposeIfCreated(_sampledPerThread, disposeHandle);
+                disposeHandle = DisposeIfCreated(_overlapPerThread, disposeHandle);
+                disposeHandle = DisposeIfCreated(_jamPerThread, disposeHandle);
+                disposeHandle = DisposeIfCreated(_speedSamplesPerThread, disposeHandle);
+                disposeHandle = DisposeIfCreated(_backpressureActivePerThread, disposeHandle);
+                disposeHandle = DisposeIfCreated(_speedSumPerThread, disposeHandle);
+                disposeHandle = DisposeIfCreated(_speedFractionSumPerThread, disposeHandle);
+                disposeHandle = DisposeIfCreated(_speedScaleSumPerThread, disposeHandle);
+                disposeHandle = DisposeIfCreated(_speedMinPerThread, disposeHandle);
+                disposeHandle = DisposeIfCreated(_speedMaxPerThread, disposeHandle);
+                disposeHandle = DisposeIfCreated(_speedScaleMinPerThread, disposeHandle);
+                disposeHandle = DisposeIfCreated(_speedHistogramPerThread, disposeHandle);
+                disposeHandle = DisposeIfCreated(_speedHistogramReduced, disposeHandle);
+                state.Dependency = disposeHandle;
+
+                _sampledPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                _overlapPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                _jamPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                _speedSamplesPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                _backpressureActivePerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                _speedSumPerThread = new NativeArray<float>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                _speedFractionSumPerThread = new NativeArray<float>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                _speedScaleSumPerThread = new NativeArray<float>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                _speedMinPerThread = new NativeArray<float>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                _speedMaxPerThread = new NativeArray<float>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                _speedScaleMinPerThread = new NativeArray<float>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                _speedHistogramPerThread = new NativeArray<int>(desired * SpeedHistogramBins, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                _speedHistogramReduced = new NativeArray<int>(SpeedHistogramBins, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                _workerCount = desired;
+                return;
+            }
+
+            if (!_speedHistogramReduced.IsCreated || _speedHistogramReduced.Length != SpeedHistogramBins)
+            {
+                JobHandle disposeHandle = state.Dependency;
+                disposeHandle = DisposeIfCreated(_speedHistogramReduced, disposeHandle);
+                state.Dependency = disposeHandle;
+                _speedHistogramReduced = new NativeArray<int>(SpeedHistogramBins, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            }
+        }
+
+        private static JobHandle DisposeIfCreated<T>(NativeArray<T> array, JobHandle dependency)
+            where T : struct
+        {
+            if (!array.IsCreated)
+            {
+                return dependency;
+            }
+
+            return array.Dispose(dependency);
+        }
+
         [BurstCompile]
         private partial struct GatherZombieSnapshotJob : IJobEntity
         {
@@ -507,7 +592,7 @@ namespace Project.Horde
         }
 
         [BurstCompile]
-        private struct ClearThreadCountersJob : IJobParallelFor
+        private struct ClearScalarCountersJob : IJobParallelFor
         {
             public NativeArray<int> Sampled;
             public NativeArray<int> Overlap;
@@ -520,8 +605,6 @@ namespace Project.Horde
             public NativeArray<float> SpeedMin;
             public NativeArray<float> SpeedMax;
             public NativeArray<float> SpeedScaleMin;
-            public NativeArray<int> SpeedHistogram;
-            public int HistogramBins;
 
             public void Execute(int index)
             {
@@ -536,12 +619,17 @@ namespace Project.Horde
                 SpeedMin[index] = float.MaxValue;
                 SpeedMax[index] = 0f;
                 SpeedScaleMin[index] = 1f;
+            }
+        }
 
-                int histBase = index * HistogramBins;
-                for (int i = 0; i < HistogramBins; i++)
-                {
-                    SpeedHistogram[histBase + i] = 0;
-                }
+        [BurstCompile]
+        private struct ClearHistogramJob : IJobParallelFor
+        {
+            public NativeArray<int> SpeedHistogram;
+
+            public void Execute(int index)
+            {
+                SpeedHistogram[index] = 0;
             }
         }
 
@@ -565,10 +653,6 @@ namespace Project.Horde
             [NativeDisableParallelForRestriction] public NativeArray<float> SpeedMaxPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<float> SpeedScaleMinPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<int> SpeedHistogramPerThread;
-            [NativeDisableParallelForRestriction][ReadOnly] public BufferLookup<PressureCell> PressureLookup;
-            public Entity PressureFieldEntity;
-            public byte HasPressureFieldEntity;
-            [ReadOnly] public BlobAssetReference<FlowFieldBlob> Flow;
             [NativeSetThreadIndex] public int ThreadIndex;
             public float InvCellSize;
             public float MinDistSq;
@@ -660,8 +744,7 @@ namespace Project.Horde
                     OverlapPerThread[workerIndex] = OverlapPerThread[workerIndex] + 1;
                 }
 
-                float localPressure = ResolveLocalPressure(pos);
-                float speedScale = ComputeSpeedScale(localPressure);
+                float speedScale = ComputeSpeedScaleFromDensity(localNeighbors);
                 SpeedScaleSumPerThread[workerIndex] = SpeedScaleSumPerThread[workerIndex] + speedScale;
                 SpeedScaleMinPerThread[workerIndex] = math.min(SpeedScaleMinPerThread[workerIndex], speedScale);
                 if (speedScale < 0.99f)
@@ -698,51 +781,19 @@ namespace Project.Horde
                 }
             }
 
-            private float ResolveLocalPressure(float2 worldPosition)
-            {
-                if (PressureEnabled == 0 || HasPressureFieldEntity == 0 || !Flow.IsCreated)
-                {
-                    return 0f;
-                }
-
-                ref FlowFieldBlob flow = ref Flow.Value;
-                int2 flowCell = WorldToFlowGrid(worldPosition, ref flow);
-                if (flowCell.x < 0 || flowCell.y < 0 || flowCell.x >= flow.Width || flowCell.y >= flow.Height)
-                {
-                    return 0f;
-                }
-
-                int flowIndex = flowCell.x + (flowCell.y * flow.Width);
-                if (!PressureLookup.HasBuffer(PressureFieldEntity))
-                {
-                    return 0f;
-                }
-
-                DynamicBuffer<PressureCell> pressureBuffer = PressureLookup[PressureFieldEntity];
-                if (flowIndex < 0 || flowIndex >= pressureBuffer.Length)
-                {
-                    return 0f;
-                }
-
-                return pressureBuffer[flowIndex].Value;
-            }
-
-            private float ComputeSpeedScale(float localPressure)
+            private float ComputeSpeedScaleFromDensity(int localNeighbors)
             {
                 if (PressureEnabled == 0)
                 {
                     return MaxSpeedFactor;
                 }
 
-                float excess = math.max(0f, localPressure - BackpressureThreshold);
+                // Metrics-only proxy: pressure ~= max(0, density - targetUnitsPerCell), where density=(1+neighbors).
+                float density = 1f + localNeighbors;
+                float pressureProxy = math.max(0f, density - TargetUnitsPerCell);
+                float excess = math.max(0f, pressureProxy - BackpressureThreshold);
                 float speedScaleRaw = 1f / (1f + (BackpressureK * excess));
                 return math.clamp(speedScaleRaw, MinSpeedFactor, MaxSpeedFactor);
-            }
-
-            private static int2 WorldToFlowGrid(float2 world, ref FlowFieldBlob flow)
-            {
-                float2 local = (world - flow.OriginWorld) / flow.CellSize;
-                return (int2)math.floor(local);
             }
         }
 

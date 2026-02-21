@@ -12,9 +12,16 @@ namespace Project.Map
         private const int InfDistance = int.MaxValue;
         private const byte NoneDirection = 255;
         private const int DirCount = 32;
+        private EntityQuery _mapQuery;
+        private EntityQuery _wallFieldQuery;
 
         public void OnCreate(ref SystemState state)
         {
+            _mapQuery = state.GetEntityQuery(
+                ComponentType.ReadOnly<MapRuntimeData>(),
+                ComponentType.ReadOnly<MapWalkableCell>());
+            _wallFieldQuery = state.GetEntityQuery(ComponentType.ReadWrite<WallFieldSingleton>());
+
             state.RequireForUpdate<MapRuntimeData>();
             state.RequireForUpdate<MapWalkableCell>();
             state.RequireForUpdate<WallFieldDirtyTag>();
@@ -22,10 +29,9 @@ namespace Project.Map
 
         public void OnDestroy(ref SystemState state)
         {
-            EntityQuery wallQuery = state.GetEntityQuery(ComponentType.ReadOnly<WallFieldSingleton>());
-            if (!wallQuery.IsEmptyIgnoreFilter)
+            if (!_wallFieldQuery.IsEmptyIgnoreFilter)
             {
-                Entity singletonEntity = wallQuery.GetSingletonEntity();
+                Entity singletonEntity = _wallFieldQuery.GetSingletonEntity();
                 WallFieldSingleton singleton = state.EntityManager.GetComponentData<WallFieldSingleton>(singletonEntity);
                 if (singleton.Blob.IsCreated)
                 {
@@ -36,8 +42,7 @@ namespace Project.Map
 
         public void OnUpdate(ref SystemState state)
         {
-            EntityQuery mapQuery = state.GetEntityQuery(ComponentType.ReadOnly<MapRuntimeData>());
-            Entity mapEntity = mapQuery.GetSingletonEntity();
+            Entity mapEntity = _mapQuery.GetSingletonEntity();
             if (!state.EntityManager.HasComponent<WallFieldDirtyTag>(mapEntity))
             {
                 return;
@@ -166,21 +171,19 @@ namespace Project.Map
             }
         }
 
-        private static Entity GetOrCreateWallEntity(ref SystemState state)
+        private Entity GetOrCreateWallEntity(ref SystemState state)
         {
-            EntityQuery query = state.EntityManager.CreateEntityQuery(ComponentType.ReadWrite<WallFieldSingleton>());
             Entity entity;
-            if (query.IsEmptyIgnoreFilter)
+            if (_wallFieldQuery.IsEmptyIgnoreFilter)
             {
                 entity = state.EntityManager.CreateEntity(typeof(WallFieldSingleton));
                 state.EntityManager.SetComponentData(entity, new WallFieldSingleton());
             }
             else
             {
-                entity = query.GetSingletonEntity();
+                entity = _wallFieldQuery.GetSingletonEntity();
             }
 
-            query.Dispose();
             return entity;
         }
 

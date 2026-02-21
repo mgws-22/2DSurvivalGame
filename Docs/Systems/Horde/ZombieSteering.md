@@ -32,6 +32,7 @@ Per zombie update:
 - Allocation-free per frame.
 - Complexity: `O(zombies)` in-map, with only a constant-size flow lookup.
 - No main-thread pressure-buffer reads; pressure sampling stays dependency-chained in jobs.
+- Pressure `BufferLookup<PressureCell>` is created once in `OnCreate` and refreshed via `.Update(ref state)` each frame.
 
 ## Known Limits
 - Can stall at local minima near cliffs.
