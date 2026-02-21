@@ -1,46 +1,51 @@
-# ZombieSteeringSystem
+# ZombieSteeringSystem + HordeBackpressureSystem
 
 ## Purpose
-Move zombies with one global expanded flow field (map + spawn margin), without gate-seeking logic.
+Split goal steering into two jobified steps:
+1. `ZombieSteeringSystem` computes flow/center intent only.
+2. `HordeBackpressureSystem` scales that intent from the pressure field and applies movement.
+
+This keeps backpressure scoped to goal/flow intent only; separation and wall repulsion stay unscaled.
 
 ## Data
-- `ZombieTag`, `ZombieMoveSpeed`, `ZombieSteeringState` (`Assets/_Project/Scripts/Horde/ZombieComponents.cs`)
+- `ZombieTag`, `ZombieMoveSpeed`, `ZombieSteeringState`, `ZombieGoalIntent` (`Assets/_Project/Scripts/Horde/ZombieComponents.cs`)
 - `LocalTransform` (Unity.Transforms)
 - `MapRuntimeData` (`Assets/_Project/Scripts/Map/MapEcsBridge.cs`)
 - `FlowFieldSingleton` (`Assets/_Project/Scripts/Map/FlowFieldComponents.cs`)
 - `HordePressureConfig`, `PressureFieldBufferTag`, `PressureCell` (`Assets/_Project/Scripts/Horde/ZombieComponents.cs`)
 
-## Steering Logic
-Per zombie update:
-1. Convert world position to expanded-flow grid coordinates.
-2. If inside expanded bounds: read flow byte and map to 32-direction unit LUT from flow blob.
-3. If outside expanded bounds: fallback to center seek direction.
-4. Fallback for `255`/invalid flow: seek center.
-5. Read local pressure from published pressure grid inside the scheduled steering job (`BufferLookup<PressureCell>`) and compute backpressure speed scale:
-   - `excess = max(0, localPressure - BackpressureThreshold)`
-   - `speedScale = clamp(1 / (1 + BackpressureK * excess), MinSpeedFactor, BackpressureMaxFactor)`
-6. Propose next position `pos + desired * speed * dt * speedScale`; reject move only if destination is invalid blocked in-map.
+## Runtime Logic
+1. `ZombieSteeringSystem`:
+   - resolves flow direction (or center fallback),
+   - validates next-step walkability,
+   - writes `ZombieGoalIntent { Direction, StepDistance }`,
+   - does not move `LocalTransform`.
+2. `HordeBackpressureSystem` (after pressure publish):
+   - samples `PressureCell` at the unit's current flow cell,
+   - computes scale:
+     - `excess = max(0, pressure - BackpressureThreshold)`
+     - `raw = 1 / (1 + BackpressureK * excess)`
+     - `speedScale = clamp(raw, MinSpeedFactor, BackpressureMaxFactor)`
+   - applies `LocalTransform += goalIntent.Direction * (goalIntent.StepDistance * speedScale)`.
+
+## Update Order
+- `ZombieSteeringSystem` runs before `HordePressureFieldSystem`.
+- `HordeBackpressureSystem` runs after `HordePressureFieldSystem`.
+- `HordeBackpressureSystem` runs before separation/hard-separation/wall systems.
 
 ## Invariants
-- Zombies never intentionally step onto blocked map cells.
-- Zombies spawned in margin area can follow flow directly toward center.
-- Speed is unchanged in normal density (`localPressure <= BackpressureThreshold`).
-- Runtime uses immutable flow blob, no per-zombie path graph solve.
+- Goal-intent is separated from integration and can be scaled independently.
+- Backpressure is pressure-field driven only.
+- Separation and wall repulsion are unaffected by backpressure scale.
+- No main-thread pressure buffer reads.
 
 ## Performance
-- Burst-compiled `IJobEntity` update.
-- Allocation-free per frame.
-- Complexity: `O(zombies)` in-map, with only a constant-size flow lookup.
-- No main-thread pressure-buffer reads; pressure sampling stays dependency-chained in jobs.
-- Pressure `BufferLookup<PressureCell>` is created once in `OnCreate` and refreshed via `.Update(ref state)` each frame.
-
-## Known Limits
-- Can stall at local minima near cliffs.
-- No inter-zombie collision avoidance.
+- Both systems are Burst `IJobEntity` and allocation-free.
+- No structural changes per frame.
+- No explicit sync points (`Complete()`).
 
 ## Verification
-1. Enter Play Mode with map and spawn systems active.
-2. Confirm zombies spawned in outer margin immediately follow flow toward center.
-3. Confirm in-map zombies follow corridors toward center.
-4. Confirm zombies do not traverse blocked cells.
-5. Verify behavior remains stable after repeated map regenerations.
+1. Enter Play Mode with pressure enabled.
+2. Verify no `InvalidOperationException`/Burst buffer restriction exceptions.
+3. In open space, confirm speed remains near unscaled baseline.
+4. In chokepoints, confirm only congested groups slow via backpressure while separation/wall still resolve overlap/collision.

@@ -976,3 +976,43 @@
 1. Enter Play Mode with metrics enabled.
 2. Verify no Burst abort / `ReadWriteBuffers` exception in `HordeTuningQuickMetricsSystem`.
 3. Confirm `[HordeTune]` logs still print speed stats (`avg/p50/p90`) and backpressure (`active%`, `avgScale`, `minScale`) with `densityProxyThreshold`.
+
+## 2026-02-21 - Pressure-only backpressure path + metrics pressure snapshot
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/ZombieComponents.cs`:
+  - added `ZombieGoalIntent` component (`Direction`, `StepDistance`) to separate goal intent from movement integration.
+- Updated `Assets/_Project/Scripts/Horde/ZombieAuthoring.cs`:
+  - baker now adds `ZombieGoalIntent` to zombie entities.
+- Updated `Assets/_Project/Scripts/Horde/ZombieSteeringSystem.cs`:
+  - `ZombieSteeringSystem` now computes only flow/center goal intent (no `LocalTransform` writes).
+  - added `HordeBackpressureSystem` (scheduled after `HordePressureFieldSystem`) that:
+    - reads `PressureCell` at current flow cell,
+    - computes backpressure scale (`threshold/k/min/max`),
+    - applies scaled goal-intent movement to `LocalTransform`.
+- Updated `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`:
+  - raised default `BackpressureThreshold` to `2.0` to keep open-space speed near unscaled baseline.
+- Updated `Assets/_Project/Scripts/Horde/HordeTuningQuickMetricsSystem.cs`:
+  - added persistent `_pressureSnapshot` (`NativeArray<float>`).
+  - added cached read-only `BufferLookup<PressureCell>` + cached pressure-buffer query in `OnCreate`.
+  - added `CopyPressureSnapshotJob : IJob` (single-thread) to copy `PressureCell` buffer into snapshot each metrics tick.
+  - `EvaluateQuickMetricsJob` no longer touches `DynamicBuffer`; it samples pressure from snapshot only.
+  - logs now label backpressure as `pressureThreshold=...` (not density proxy).
+- Updated docs:
+  - `Docs/Systems/Horde/ZombieSteering.md`
+  - `Docs/Systems/Horde/HordePressureField.md`
+  - `Docs/Systems/Horde/HordeTuningQuickMetrics.md`
+
+### Why
+- Keeps backpressure driven only by published pressure-field values.
+- Removes Burst parallel `DynamicBuffer` access from metrics job to eliminate `ReadWriteBuffers` restriction crashes.
+- Preserves jobified dependency chaining with zero hot-path `Complete()` stalls.
+
+### How to test
+1. Enter Play Mode with pressure and quick metrics enabled.
+2. Verify no Burst abort / `ReadWriteBuffers` exception and no `InvalidOperationException` around `PressureCell`.
+3. Confirm `[HordeTune]` still prints speed stats (`avg/p50/p90`) and `backpressure(... active=... avgScale=... minScale=...)`.
+4. In open space, verify backpressure active% stays low; in chokepoints, verify active% rises.
+5. Profiler watchlist:
+   - gameplay `GC Alloc = 0 B`
+   - no new sync spikes from `Complete()`.

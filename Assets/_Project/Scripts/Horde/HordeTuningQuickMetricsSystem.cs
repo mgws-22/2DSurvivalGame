@@ -43,7 +43,10 @@ namespace Project.Horde
         private NativeArray<float> _speedScaleMinPerThread;
         private NativeArray<int> _speedHistogramPerThread;
         private NativeArray<int> _speedHistogramReduced;
+        private NativeArray<float> _pressureSnapshot;
         private ComponentLookup<HordeTuningQuickMetrics> _metricsLookup;
+        private BufferLookup<PressureCell> _pressureLookup;
+        private EntityQuery _pressureBufferQuery;
 
         public void OnCreate(ref SystemState state)
         {
@@ -72,6 +75,8 @@ namespace Project.Horde
             _speedHistogramPerThread = new NativeArray<int>(_workerCount * SpeedHistogramBins, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _speedHistogramReduced = new NativeArray<int>(SpeedHistogramBins, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _metricsLookup = state.GetComponentLookup<HordeTuningQuickMetrics>(false);
+            _pressureLookup = state.GetBufferLookup<PressureCell>(true);
+            _pressureBufferQuery = state.GetEntityQuery(ComponentType.ReadOnly<PressureFieldBufferTag>());
 
             EntityQuery configQuery = state.GetEntityQuery(ComponentType.ReadWrite<HordeTuningQuickConfig>());
             if (configQuery.IsEmptyIgnoreFilter)
@@ -200,6 +205,11 @@ namespace Project.Horde
             {
                 _speedHistogramReduced.Dispose();
             }
+
+            if (_pressureSnapshot.IsCreated)
+            {
+                _pressureSnapshot.Dispose();
+            }
         }
 
         public void OnUpdate(ref SystemState state)
@@ -249,13 +259,12 @@ namespace Project.Horde
                 float overlapPct = metrics.Sampled > 0 ? (100f * metrics.OverlapHits / metrics.Sampled) : 0f;
                 float jamPct = metrics.Sampled > 0 ? (100f * metrics.JamHits / metrics.Sampled) : 0f;
                 float activeBackpressurePct = metrics.Sampled > 0 ? (100f * metrics.BackpressureActiveHits / metrics.Sampled) : 0f;
-                float densityProxyThreshold = math.max(0f, pressureConfig.TargetUnitsPerCell + pressureConfig.BackpressureThreshold);
 
                 UnityEngine.Debug.Log(
                     $"[HordeTune] logIntervalSeconds={logIntervalSeconds:F4} simDt={simDt:F4} sampled={metrics.Sampled} overlap={overlapPct:F1}% jam={jamPct:F1}% " +
                     $"speed(avg={metrics.AvgSpeed:F2} p50={metrics.P50Speed:F2} p90={metrics.P90Speed:F2} min={metrics.MinSpeed:F2} max={metrics.MaxSpeed:F2}) " +
                     $"frac(avg={metrics.AvgSpeedFraction:F2}) " +
-                    $"backpressure(densityProxyThreshold={densityProxyThreshold:F2} k={pressureConfig.BackpressureK:F2} active={activeBackpressurePct:F1}% avgScale={metrics.AvgSpeedScale:F2} minScale={metrics.MinSpeedScale:F2}) " +
+                    $"backpressure(pressureThreshold={pressureConfig.BackpressureThreshold:F2} k={pressureConfig.BackpressureK:F2} active={activeBackpressurePct:F1}% avgScale={metrics.AvgSpeedScale:F2} minScale={metrics.MinSpeedScale:F2}) " +
                     $"sepCapFrame={separationCap:F4} pressureCapFrame={pressureEffectiveCap:F4} " +
                     $"sepMaxPushPerFrame={separationConfig.MaxPushPerFrame:F3} pressureMaxPushPerFrame={pressureConfig.MaxPushPerFrame:F3} pressureSpeedFractionCap={pressureConfig.SpeedFractionCap:F2} " +
                     $"backpressureThreshold={pressureConfig.BackpressureThreshold:F2} backpressureK={pressureConfig.BackpressureK:F2} " +
@@ -288,7 +297,6 @@ namespace Project.Horde
             float influenceRadius = minDist * math.max(1f, separationConfig.InfluenceRadiusFactor);
             float influenceRadiusSq = influenceRadius * influenceRadius;
             int maxNeighbors = math.clamp(separationConfig.MaxNeighbors, 4, 64);
-            float targetUnitsPerCell = math.max(0f, pressureConfig.TargetUnitsPerCell);
             float dtWindowForSpeed = math.max(deltaTime, _elapsedSinceTick);
             _elapsedSinceTick = 0f;
             float backpressureThreshold = math.max(0f, pressureConfig.BackpressureThreshold);
@@ -305,6 +313,17 @@ namespace Project.Horde
             {
                 return;
             }
+            int flowCellCount = flowSingleton.Blob.Value.Width * flowSingleton.Blob.Value.Height;
+            if (flowCellCount <= 0)
+            {
+                return;
+            }
+
+            EnsurePressureSnapshotCapacity(ref state, flowCellCount);
+            _pressureLookup.Update(ref state);
+            Entity pressureFieldEntity = _pressureBufferQuery.IsEmptyIgnoreFilter
+                ? Entity.Null
+                : _pressureBufferQuery.GetSingletonEntity();
 
             EnsureCapacity(count, sampleStride);
             _entities.ResizeUninitialized(count);
@@ -358,12 +377,23 @@ namespace Project.Horde
             };
             dependency = clearHistogramJob.Schedule(_speedHistogramPerThread.Length, 256, dependency);
 
+            CopyPressureSnapshotJob copyPressureJob = new CopyPressureSnapshotJob
+            {
+                PressureLookup = _pressureLookup,
+                PressureFieldEntity = pressureFieldEntity,
+                PressureSnapshot = _pressureSnapshot,
+                FlowCellCount = flowCellCount
+            };
+            dependency = copyPressureJob.Schedule(dependency);
+
             EvaluateQuickMetricsJob evaluateJob = new EvaluateQuickMetricsJob
             {
                 Entities = _entities.AsArray(),
                 Positions = _positions.AsArray(),
                 MoveSpeeds = _moveSpeeds.AsArray(),
                 Grid = _cellToIndex,
+                Flow = flowSingleton.Blob,
+                PressureSnapshot = _pressureSnapshot,
                 PreviousSampledPositions = _previousSampledPositions,
                 SampledPerThread = _sampledPerThread,
                 OverlapPerThread = _overlapPerThread,
@@ -382,7 +412,6 @@ namespace Project.Horde
                 InfluenceRadiusSq = influenceRadiusSq,
                 MaxNeighbors = maxNeighbors,
                 SampleStride = sampleStride,
-                TargetUnitsPerCell = targetUnitsPerCell,
                 DeltaTimeWindow = dtWindowForSpeed,
                 SpeedThresholdFactor = 0.2f,
                 SpeedHistogramBins = SpeedHistogramBins,
@@ -464,6 +493,20 @@ namespace Project.Horde
             }
 
             _ = sampleStride;
+        }
+
+        private void EnsurePressureSnapshotCapacity(ref SystemState state, int flowCellCount)
+        {
+            int desired = math.max(1, flowCellCount);
+            if (_pressureSnapshot.IsCreated && _pressureSnapshot.Length == desired)
+            {
+                return;
+            }
+
+            JobHandle disposeHandle = state.Dependency;
+            disposeHandle = DisposeIfCreated(_pressureSnapshot, disposeHandle);
+            state.Dependency = disposeHandle;
+            _pressureSnapshot = new NativeArray<float>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
         }
 
         private void EnsureThreadCounterCapacity(ref SystemState state)
@@ -592,6 +635,36 @@ namespace Project.Horde
         }
 
         [BurstCompile]
+        private struct CopyPressureSnapshotJob : IJob
+        {
+            [ReadOnly] public BufferLookup<PressureCell> PressureLookup;
+            public Entity PressureFieldEntity;
+            [NativeDisableParallelForRestriction] public NativeArray<float> PressureSnapshot;
+            public int FlowCellCount;
+
+            public void Execute()
+            {
+                int count = math.min(FlowCellCount, PressureSnapshot.Length);
+                for (int i = 0; i < count; i++)
+                {
+                    PressureSnapshot[i] = 0f;
+                }
+
+                if (PressureFieldEntity == Entity.Null || !PressureLookup.HasBuffer(PressureFieldEntity))
+                {
+                    return;
+                }
+
+                DynamicBuffer<PressureCell> pressureBuffer = PressureLookup[PressureFieldEntity];
+                int copyCount = math.min(count, pressureBuffer.Length);
+                for (int i = 0; i < copyCount; i++)
+                {
+                    PressureSnapshot[i] = pressureBuffer[i].Value;
+                }
+            }
+        }
+
+        [BurstCompile]
         private struct ClearScalarCountersJob : IJobParallelFor
         {
             public NativeArray<int> Sampled;
@@ -640,6 +713,8 @@ namespace Project.Horde
             [ReadOnly] public NativeArray<float2> Positions;
             [ReadOnly] public NativeArray<float> MoveSpeeds;
             [ReadOnly] public NativeParallelMultiHashMap<int, int> Grid;
+            [ReadOnly] public BlobAssetReference<FlowFieldBlob> Flow;
+            [ReadOnly] public NativeArray<float> PressureSnapshot;
             [ReadOnly] public NativeParallelHashMap<Entity, float2> PreviousSampledPositions;
             [NativeDisableParallelForRestriction] public NativeArray<int> SampledPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<int> OverlapPerThread;
@@ -659,7 +734,6 @@ namespace Project.Horde
             public float InfluenceRadiusSq;
             public int MaxNeighbors;
             public int SampleStride;
-            public float TargetUnitsPerCell;
             public float DeltaTimeWindow;
             public float SpeedThresholdFactor;
             public int SpeedHistogramBins;
@@ -744,7 +818,8 @@ namespace Project.Horde
                     OverlapPerThread[workerIndex] = OverlapPerThread[workerIndex] + 1;
                 }
 
-                float speedScale = ComputeSpeedScaleFromDensity(localNeighbors);
+                float localPressure = ResolveLocalPressure(pos);
+                float speedScale = ComputeSpeedScaleFromPressure(localPressure);
                 SpeedScaleSumPerThread[workerIndex] = SpeedScaleSumPerThread[workerIndex] + speedScale;
                 SpeedScaleMinPerThread[workerIndex] = math.min(SpeedScaleMinPerThread[workerIndex], speedScale);
                 if (speedScale < 0.99f)
@@ -752,7 +827,7 @@ namespace Project.Horde
                     BackpressureActivePerThread[workerIndex] = BackpressureActivePerThread[workerIndex] + 1;
                 }
 
-                bool dense = (1f + localNeighbors) >= TargetUnitsPerCell;
+                bool dense = PressureEnabled != 0 && localPressure > BackpressureThreshold;
                 bool slow = false;
                 Entity entity = Entities[index];
                 if (PreviousSampledPositions.TryGetValue(entity, out float2 previousPos))
@@ -781,19 +856,50 @@ namespace Project.Horde
                 }
             }
 
-            private float ComputeSpeedScaleFromDensity(int localNeighbors)
+            private float ResolveLocalPressure(float2 position)
+            {
+                if (!Flow.IsCreated)
+                {
+                    return 0f;
+                }
+
+                ref FlowFieldBlob flow = ref Flow.Value;
+                int2 cell = WorldToFlowGrid(position, ref flow);
+                if (!IsInFlowBounds(cell, ref flow))
+                {
+                    return 0f;
+                }
+
+                int flowIndex = cell.x + (cell.y * flow.Width);
+                if (flowIndex < 0 || flowIndex >= PressureSnapshot.Length)
+                {
+                    return 0f;
+                }
+
+                return math.max(0f, PressureSnapshot[flowIndex]);
+            }
+
+            private float ComputeSpeedScaleFromPressure(float localPressure)
             {
                 if (PressureEnabled == 0)
                 {
-                    return MaxSpeedFactor;
+                    return 1f;
                 }
 
-                // Metrics-only proxy: pressure ~= max(0, density - targetUnitsPerCell), where density=(1+neighbors).
-                float density = 1f + localNeighbors;
-                float pressureProxy = math.max(0f, density - TargetUnitsPerCell);
-                float excess = math.max(0f, pressureProxy - BackpressureThreshold);
+                float excess = math.max(0f, localPressure - BackpressureThreshold);
                 float speedScaleRaw = 1f / (1f + (BackpressureK * excess));
                 return math.clamp(speedScaleRaw, MinSpeedFactor, MaxSpeedFactor);
+            }
+
+            private static int2 WorldToFlowGrid(float2 world, ref FlowFieldBlob flow)
+            {
+                float2 local = (world - flow.OriginWorld) / flow.CellSize;
+                return (int2)math.floor(local);
+            }
+
+            private static bool IsInFlowBounds(int2 grid, ref FlowFieldBlob flow)
+            {
+                return grid.x >= 0 && grid.y >= 0 && grid.x < flow.Width && grid.y < flow.Height;
             }
         }
 

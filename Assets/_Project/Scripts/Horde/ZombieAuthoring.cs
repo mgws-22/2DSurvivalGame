@@ -26,6 +26,11 @@ namespace Project.Horde
             {
                 LastDirection = new float2(0f, 0f)
             });
+            AddComponent(entity, new ZombieGoalIntent
+            {
+                Direction = float2.zero,
+                StepDistance = 0f
+            });
         }
     }
 }

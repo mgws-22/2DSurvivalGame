@@ -14,19 +14,18 @@ Provide low-overhead runtime tuning metrics (sampled overlap and jam rates) so c
 1. Runs after `WallRepulsionSystem` so metrics reflect final resolved positions.
 2. Every `LogEveryNFrames`, snapshots zombie entities/positions/speeds.
 3. Builds a spatial hash grid and evaluates only sampled zombies (`EntityIndexInQuery % SampleStride == 0`).
-4. Computes a metrics-only density proxy from local neighbor count and evaluates backpressure scale in job:
-   - `density = 1 + localNeighbors`
-   - `pressureProxy = max(0, density - TargetUnitsPerCell)`
-   - `excess = max(0, pressureProxy - BackpressureThreshold)`
+4. Schedules `CopyPressureSnapshotJob` (`IJob`) that copies singleton `DynamicBuffer<PressureCell>` into persistent `NativeArray<float> _pressureSnapshot` for the current flow cell count.
+5. Parallel metrics evaluation reads pressure only from `_pressureSnapshot` (never from `DynamicBuffer` in parallel job) and computes backpressure scale:
+   - `excess = max(0, localPressure - BackpressureThreshold)`
    - `speedScale = clamp(1 / (1 + BackpressureK * excess), MinSpeedFactor, MaxSpeedFactor)`
-5. `overlap(sample)%`:
+6. `overlap(sample)%`:
    - sampled zombie counts as overlap if any nearby neighbor is closer than `2 * Radius`.
-6. `jam%` (cheap approximation):
+7. `jam%` (cheap approximation):
    - sampled zombie is jammed if:
-     - estimated local density (`1 + nearby neighbors within influence radius`) is `>= TargetUnitsPerCell`, and
+     - sampled local pressure is above `BackpressureThreshold`, and
      - sampled displacement speed between metric ticks is below `moveSpeed * 0.2`.
-7. Collects observed speed statistics from sampled displacement using per-thread counters and a fixed 32-bin histogram (`0..2 units/s`) for percentile approximation.
-8. Logs one `[HordeTune]` line per metrics tick in Editor/Development builds:
+8. Collects observed speed statistics from sampled displacement using per-thread counters and a fixed 32-bin histogram (`0..2 units/s`) for percentile approximation.
+9. Logs one `[HordeTune]` line per metrics tick in Editor/Development builds:
    - `logIntervalSeconds` for sampling window length
    - `simDt` for current simulation frame dt
    - overlap/jam percentages
@@ -42,7 +41,8 @@ Provide low-overhead runtime tuning metrics (sampled overlap and jam rates) so c
 - Sampling is deterministic (`EntityIndexInQuery` stride).
 - Histogram and all thread accumulators are persistent native arrays (no per-tick allocations).
 - Thread counter arrays are resized only when `JobsUtility.MaxJobThreadCount` changes, then reused.
-- No `DynamicBuffer<PressureCell>` dependency in metrics jobs.
+- No `DynamicBuffer<PressureCell>` access in parallel metrics jobs.
+- Pressure buffer access is isolated to one single-thread snapshot copy job and dependency-chained.
 
 ## Performance
 - Metrics run only at configured interval (default every 60 frames).
@@ -53,7 +53,7 @@ Provide low-overhead runtime tuning metrics (sampled overlap and jam rates) so c
 ## Verification
 1. Enter Play Mode and confirm one startup config log appears: `[HordeTune] cfg ...`.
 2. Confirm periodic logs appear:
-   - `[HordeTune] logIntervalSeconds=... simDt=... sampled=... overlap=... jam=... speed(... ) frac(... ) backpressure(densityProxyThreshold=... k=... active=... avgScale=... minScale=...) ...`
+   - `[HordeTune] logIntervalSeconds=... simDt=... sampled=... overlap=... jam=... speed(... ) frac(... ) backpressure(pressureThreshold=... k=... active=... avgScale=... minScale=...) ...`
 3. Verify `sepCap > pressureCap` with current tuning.
 4. Verify `backpressure(active=...)` stays low in open flow and rises in chokepoint jams.
 5. Confirm Profiler `GC Alloc` remains `0 B` in gameplay loop.

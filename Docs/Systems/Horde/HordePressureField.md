@@ -27,7 +27,8 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
 11. Rejects pressure move if resulting position lands in a blocked expanded flow cell.
 
 ## Update Order
-- Runs after `ZombieSteeringSystem`.
+- Runs after `ZombieSteeringSystem` (which now writes `ZombieGoalIntent` only).
+- Runs before `HordeBackpressureSystem` (which reads published `PressureCell` and applies scaled goal intent).
 - Runs before `HordeSeparationSystem`, which runs before `HordeHardSeparationSystem`.
 - Runs before `WallRepulsionSystem`.
 - `WallRepulsionSystem` remains the final blocked-cell safety correction.
@@ -39,8 +40,8 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
 - One-frame pressure config budget is `MaxPushPerFrame * dt`.
 - One-frame pressure speed budget is `moveSpeed * dt * SpeedFractionCap`.
 - Effective pressure cap per unit is `min(configBudget, speedBudget)`.
-- Backpressure tuning fields (consumed by `ZombieSteeringSystem`):
-  - `BackpressureThreshold` (default `1.5`)
+- Backpressure tuning fields (consumed by `HordeBackpressureSystem` and metrics):
+  - `BackpressureThreshold` (default `2.0`)
   - `BackpressureK` (default `0.35`)
   - `MinSpeedFactor` (default `0.20`)
   - `BackpressureMaxFactor` (default `1.0`)

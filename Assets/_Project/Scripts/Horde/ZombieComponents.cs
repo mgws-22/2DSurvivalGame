@@ -17,6 +17,12 @@ namespace Project.Horde
         public float2 LastDirection;
     }
 
+    public struct ZombieGoalIntent : IComponentData
+    {
+        public float2 Direction;
+        public float StepDistance;
+    }
+
     public struct ZombieSpawnConfig : IComponentData
     {
         public float SpawnRate;
