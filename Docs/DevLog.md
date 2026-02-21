@@ -1059,6 +1059,46 @@
 3. Check if late-run overlap/jam escalation slows down (or peaks lower) versus previous run.
 4. Verify no new sync points and `GC Alloc = 0 B` in gameplay.
 
+## 2026-02-21 - Tuning iteration: medium-density overlap + early backpressure
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`:
+  - `BackpressureThreshold: 4.0 -> 5.0`
+  - `BackpressureK: 0.40 -> 0.25`
+- Updated `Assets/_Project/Scripts/Horde/HordeSeparationSystem.cs`:
+  - `MaxPushPerFrame: 1.30 -> 1.60`
+
+### Why
+- In non-jammed windows (`jam=0`), backpressure still activated up to `42.9%` with `avgScale` down to `0.80`, so slowdown was engaging too early.
+- Overlap in medium-density windows still reached `57.1%`, so soft separation needed more local push authority.
+
+### How to test
+1. Re-run the same scenario and compare `[HordeTune]` windows with `jam=0`.
+2. Confirm `backpressure active` stays closer to `0..5%` before true congestion.
+3. Confirm medium-density overlap (14.3%/28.6%/57.1% windows) trends lower.
+4. Verify no new sync points and `GC Alloc = 0 B` in gameplay.
+
+## 2026-02-21 - Tuning iteration: medium-density overlap persists with pre-jam slowdown
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`:
+  - `BackpressureThreshold: 5.0 -> 5.5`
+  - `BackpressureK: 0.25 -> 0.15`
+- Updated `Assets/_Project/Scripts/Horde/HordeSeparationSystem.cs`:
+  - `SeparationStrength: 1.0 -> 1.15`
+  - `MaxPushPerFrame: 1.60 -> 1.90`
+
+### Why
+- Run still showed high overlap before full jam (`overlap` climbing to `42.9%` with `jam=0%`), then steep escalation.
+- Backpressure also engaged while not jammed (`active=42.9%..57.1%` with `jam=0%`, `avgScale` dropping to `0.85` and `0.78`), so entry needed to be later and gentler.
+- Soft separation caps had already been raised; this pass adds modest strength and more cap to improve medium-density de-overlap.
+
+### How to test
+1. Re-run the same scenario and compare `[HordeTune]` windows at `jam=0%`.
+2. Confirm backpressure active% stays lower before true congestion.
+3. Check if overlap in medium-density windows (14.3%/28.6%/42.9%) trends lower.
+4. Verify no new sync points and `GC Alloc = 0 B` in gameplay.
+
 ## 2026-02-21 - Tuning iteration: sink-jam mitigation pass 2 (threshold split + stronger soft push)
 
 ### What changed

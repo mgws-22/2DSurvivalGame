@@ -49,21 +49,21 @@ namespace Project.Horde
                     // Viktigt: detta måste matcha din sprite/world scale (halva diametern)
                     Radius = 0.10f,
 
-                    CellSizeFactor = 1.25f,
-                    InfluenceRadiusFactor = 2.00f, // tuning: widen local neighbor awareness to reduce high overlap
+                    CellSizeFactor = 1.55f,
+                    InfluenceRadiusFactor = 3.00f, // tuning: widen local neighbor awareness to reduce high overlap
 
                     // SeparationStrength: håll modest för att undvika jitter,
                     // låt iterations + caps göra jobbet.
-                    SeparationStrength = 1.0f,
+                    SeparationStrength = 5.15f,
 
                     // Se till att separation inte är "för snål" i trängsel.
                     // Om du har global speed clamp (moveSpeed*dt) kan du sätta den högre.
-                    MaxPushPerFrame = 1.30f, // tuning: Rule1 run-2, raise soft authority for persistent high overlap
+                    MaxPushPerFrame = 2.2f, // tuning: Rule1 run-2, raise soft authority for persistent high overlap
 
                     MaxNeighbors = 32,
 
                     // Punktmål + trängsel => 2 iterationer är ofta nyckeln
-                    Iterations = 2
+                    Iterations = 3
                 });
             }
         }

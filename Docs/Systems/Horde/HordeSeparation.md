@@ -29,8 +29,8 @@ Optional second pass is supported via `Iterations` (clamped to `1..2`).
 - `CellSizeFactor = 1.25` (`cellSize = minDist * factor`)
 - `InfluenceRadiusFactor = 2.0` (`influence = minDist * factor`)
 - `MaxNeighbors = 32`
-- `SeparationStrength = 1.0`
-- `MaxPushPerFrame = 1.30`
+- `SeparationStrength = 1.15`
+- `MaxPushPerFrame = 1.90`
 - `Iterations = 2`
 
 ## Invariants
