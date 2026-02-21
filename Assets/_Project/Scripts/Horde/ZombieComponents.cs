@@ -70,12 +70,23 @@ namespace Project.Horde
         public float PressureStrength;
         public float MaxPushPerFrame;
         public float SpeedFractionCap;
+        public float BackpressureThreshold;
         public float MinSpeedFactor;
         public float BackpressureK;
+        public float BackpressureMaxFactor;
         public float BlockedCellPenalty;
         public int FieldUpdateIntervalFrames;
         public int BlurPasses;
         public byte DisablePairwiseSeparationWhenPressureEnabled;
+    }
+
+    public struct PressureFieldBufferTag : IComponentData
+    {
+    }
+
+    public struct PressureCell : IBufferElementData
+    {
+        public float Value;
     }
 
     public struct HordeTuningQuickConfig : IComponentData
@@ -90,6 +101,16 @@ namespace Project.Horde
         public int Sampled;
         public int OverlapHits;
         public int JamHits;
+        public int SpeedSamples;
+        public int BackpressureActiveHits;
         public float Dt;
+        public float AvgSpeed;
+        public float P50Speed;
+        public float P90Speed;
+        public float MinSpeed;
+        public float MaxSpeed;
+        public float AvgSpeedFraction;
+        public float AvgSpeedScale;
+        public float MinSpeedScale;
     }
 }
