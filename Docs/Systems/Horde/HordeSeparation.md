@@ -27,10 +27,11 @@ Optional second pass is supported via `Iterations` (clamped to `1..2`).
 - `Radius = 0.05`
 - `minDist = 2 * Radius`
 - `CellSizeFactor = 1.25` (`cellSize = minDist * factor`)
-- `InfluenceRadiusFactor = 1.5` (`influence = minDist * factor`)
+- `InfluenceRadiusFactor = 2.0` (`influence = minDist * factor`)
 - `MaxNeighbors = 24`
-- `SeparationStrength = 0.7`
-- `MaxPushPerFrame = 0.12`
+- `SeparationStrength = 1.0`
+- `MaxPushPerFrame = 0.60`
+- `Iterations = 2`
 
 ## Invariants
 - Only zombies are moved by separation.

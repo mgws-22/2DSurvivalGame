@@ -75,4 +75,19 @@ namespace Project.Horde
         public int BlurPasses;
         public byte DisablePairwiseSeparationWhenPressureEnabled;
     }
+
+    public struct HordeTuningQuickConfig : IComponentData
+    {
+        public int Enabled;
+        public int LogEveryNFrames;
+        public int SampleStride;
+    }
+
+    public struct HordeTuningQuickMetrics : IComponentData
+    {
+        public int Sampled;
+        public int OverlapHits;
+        public int JamHits;
+        public float Dt;
+    }
 }

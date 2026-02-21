@@ -769,3 +769,36 @@
 2. Run Play Mode with 5k+ to 20k+ units and ensure pressure behavior is stable.
 3. Check one-time runtime diag still prints pressure cap math values.
 4. Profile and verify `GC Alloc` remains `0 B` in gameplay loop.
+
+## 2026-02-21 - Separation authority tuning + quick overlap/jam metrics
+
+### What changed
+- Confirmed/kept soft separation default cap at `MaxPushPerFrame = 0.40` (units/second, dt-scaled in runtime), with `Iterations = 2` and `MaxNeighbors = 24`.
+- Added quick tuning metrics runtime components in `Assets/_Project/Scripts/Horde/ZombieComponents.cs`:
+  - `HordeTuningQuickConfig`
+  - `HordeTuningQuickMetrics`
+- Added `Assets/_Project/Scripts/Horde/HordeTuningQuickMetricsSystem.cs`:
+  - runs after `WallRepulsionSystem`
+  - samples every Nth entity (`SampleStride`) every `LogEveryNFrames`
+  - computes sampled overlap and jam counters using a bounded local grid-neighbor scan
+  - logs `[HordeTune]` once per metrics tick in Editor/Development builds
+  - uses persistent native containers only, no explicit `Complete()`
+- Updated docs:
+  - `Docs/Systems/Horde/HordeSeparation.md`
+  - `Docs/Systems/Horde/HordeTuningQuickMetrics.md`
+  - `Docs/Architecture/Index.md`
+
+### Why
+- Needed soft separation to have stronger correction authority than pressure near high-density sinks.
+- Needed lightweight data-driven observability (overlap/jam percentages) for iterative tuning.
+
+### How to test
+1. Enter Play Mode and check one-time `[HordeRuntimeDiag]` values:
+   - `SeparationMaxThisFrame` should be higher than `PressureEffectiveCapThisFrame`.
+2. Confirm `[HordeTune] cfg ...` startup log appears once.
+3. Confirm periodic `[HordeTune]` logs appear with sampled/overlap/jam plus `sepCap`/`pressureCap`.
+4. Profile and verify `GC Alloc` remains `0 B` in gameplay loop.
+
+## 2026-02-21 - Data-driven tuning iteration (run data)
+- Raised `HordeSeparationConfig.MaxPushPerFrame` from `0.40` to `0.60` (units/second) and `InfluenceRadiusFactor` from `1.75` to `2.00`.
+- Reason: `[HordeTune]` overlap stayed far above target (>8%, trending to 100%), so Rule 1 was applied to increase soft separation authority and widen local neighbor response.
