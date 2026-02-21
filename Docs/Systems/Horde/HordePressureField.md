@@ -22,7 +22,10 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
 6. Adds deterministic per-entity spread bias in tie/symmetry cases so dense stacks do not move in perfect lockstep.
 7. Removes any backward component vs flow direction (`dot(pressureDir, flowDir) < 0` projected out).
 8. Push is speed-capped using dt-normalized config budget: `min(MaxPushPerFrame * dt, moveSpeed * dt * SpeedFractionCap)`.
-9. Rejects pressure move if resulting position lands in a blocked expanded flow cell.
+9. Applies minimal backpressure against flow in dense cells:
+   - `speedFactor = clamp(1 / (1 + BackpressureK * localPressure), MinSpeedFactor, 1)`
+   - net backward step along flow is `moveSpeed * dt * (1 - speedFactor)`
+10. Rejects pressure/backpressure move if resulting position lands in a blocked expanded flow cell.
 
 ## Update Order
 - Runs after `ZombieSteeringSystem`.
@@ -37,6 +40,9 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
 - One-frame pressure config budget is `MaxPushPerFrame * dt`.
 - One-frame pressure speed budget is `moveSpeed * dt * SpeedFractionCap`.
 - Effective pressure cap per unit is `min(configBudget, speedBudget)`.
+- Backpressure tuning fields:
+  - `MinSpeedFactor` (default `0.15`)
+  - `BackpressureK` (default `0.35`)
 - Density accumulation is parallel and race-free without `unsafe` code by using per-thread bins plus a reduce pass.
 - Pressure push is bounded and cannot exceed configured speed fraction per frame.
 - Blocked-cell projection safety remains in wall repulsion, so units do not remain in blocked map cells.

@@ -151,6 +151,7 @@ namespace Project.Horde
             {
                 UnityEngine.Debug.Log(
                     $"[HordeTune] cfg targetUnits={pressureConfig.TargetUnitsPerCell:F2} pressureSpeedFractionCap={pressureConfig.SpeedFractionCap:F2} " +
+                    $"pressureMaxPushPerFrame={pressureConfig.MaxPushPerFrame:F2} minSpeedFactor={pressureConfig.MinSpeedFactor:F2} backpressureK={pressureConfig.BackpressureK:F2} " +
                     $"sepMaxPushPerFrame={separationConfig.MaxPushPerFrame:F2} sepIterations={separationConfig.Iterations} radius={separationConfig.Radius:F3} " +
                     $"logEveryFrames={quickConfig.LogEveryNFrames} sampleStride={quickConfig.SampleStride}");
                 s_loggedConfigOnce = true;
@@ -159,20 +160,23 @@ namespace Project.Horde
             if (_pendingMetricsLog)
             {
                 HordeTuningQuickMetrics metrics = SystemAPI.GetSingleton<HordeTuningQuickMetrics>();
-                float dtWindow = math.max(0f, metrics.Dt);
+                float logIntervalSeconds = math.max(0f, metrics.Dt);
+                float simDt = deltaTime;
                 float referenceMoveSpeed = 1f;
-                float refMaxStep = referenceMoveSpeed * dtWindow;
-                float pressureConfigBudget = math.max(0f, pressureConfig.MaxPushPerFrame) * dtWindow;
+                float refMaxStep = referenceMoveSpeed * simDt;
+                float pressureConfigBudget = math.max(0f, pressureConfig.MaxPushPerFrame) * simDt;
                 float pressureSpeedBudget = refMaxStep * math.clamp(pressureConfig.SpeedFractionCap, 0f, 1f);
                 float pressureEffectiveCap = math.min(pressureConfigBudget, pressureSpeedBudget);
-                float separationCap = math.min(math.max(0f, separationConfig.MaxPushPerFrame) * dtWindow, refMaxStep);
+                float separationCap = math.max(0f, separationConfig.MaxPushPerFrame) * simDt;
 
                 float overlapPct = metrics.Sampled > 0 ? (100f * metrics.OverlapHits / metrics.Sampled) : 0f;
                 float jamPct = metrics.Sampled > 0 ? (100f * metrics.JamHits / metrics.Sampled) : 0f;
 
                 UnityEngine.Debug.Log(
-                    $"[HordeTune] dt={dtWindow:F4} sampled={metrics.Sampled} overlap={overlapPct:F1}% jam={jamPct:F1}% " +
-                    $"sepCap={separationCap:F4} pressureCap={pressureEffectiveCap:F4} radius={math.max(0.001f, separationConfig.Radius):F3}");
+                    $"[HordeTune] logIntervalSeconds={logIntervalSeconds:F4} simDt={simDt:F4} sampled={metrics.Sampled} overlap={overlapPct:F1}% jam={jamPct:F1}% " +
+                    $"sepCapFrame={separationCap:F4} pressureCapFrame={pressureEffectiveCap:F4} " +
+                    $"sepMaxPushPerFrame={separationConfig.MaxPushPerFrame:F3} pressureMaxPushPerFrame={pressureConfig.MaxPushPerFrame:F3} pressureSpeedFractionCap={pressureConfig.SpeedFractionCap:F2} " +
+                    $"radius={math.max(0.001f, separationConfig.Radius):F3}");
 
                 _pendingMetricsLog = false;
             }

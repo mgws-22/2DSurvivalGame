@@ -30,7 +30,7 @@ Optional second pass is supported via `Iterations` (clamped to `1..2`).
 - `InfluenceRadiusFactor = 2.0` (`influence = minDist * factor`)
 - `MaxNeighbors = 24`
 - `SeparationStrength = 1.0`
-- `MaxPushPerFrame = 0.60`
+- `MaxPushPerFrame = 0.75`
 - `Iterations = 2`
 
 ## Invariants

@@ -20,7 +20,10 @@ Provide low-overhead runtime tuning metrics (sampled overlap and jam rates) so c
    - sampled zombie is jammed if:
      - estimated local density (`1 + nearby neighbors within influence radius`) is `>= TargetUnitsPerCell`, and
      - sampled displacement speed between metric ticks is below `moveSpeed * 0.2`.
-6. Logs one `[HordeTune]` line per metrics tick in Editor/Development builds.
+6. Logs one `[HordeTune]` line per metrics tick in Editor/Development builds:
+   - `logIntervalSeconds` for sampling window length
+   - `simDt` for current simulation frame dt
+   - per-frame cap estimates (`sepCapFrame`, `pressureCapFrame`) plus raw pressure/separation config values.
 
 ## Invariants
 - No per-frame managed allocations in gameplay hot path.
@@ -37,6 +40,6 @@ Provide low-overhead runtime tuning metrics (sampled overlap and jam rates) so c
 ## Verification
 1. Enter Play Mode and confirm one startup config log appears: `[HordeTune] cfg ...`.
 2. Confirm periodic logs appear:
-   - `[HordeTune] dt=... sampled=... overlap=... jam=... sepCap=... pressureCap=...`
+   - `[HordeTune] logIntervalSeconds=... simDt=... sampled=... overlap=... jam=... sepCapFrame=... pressureCapFrame=...`
 3. Verify `sepCap > pressureCap` with current tuning.
 4. Confirm Profiler `GC Alloc` remains `0 B` in gameplay loop.

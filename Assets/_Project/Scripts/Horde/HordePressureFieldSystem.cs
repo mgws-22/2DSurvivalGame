@@ -56,6 +56,9 @@ namespace Project.Horde
                     // Pressure får bara använda en del av moveSpeed*dt-budgeten
                     SpeedFractionCap = 0.25f,
 
+                    MinSpeedFactor = 0.15f,
+                    BackpressureK = 0.35f,
+
                     // Lägre för att undvika "väggmagnetism"
                     BlockedCellPenalty = 3.0f,
 
@@ -115,6 +118,13 @@ namespace Project.Horde
             MapRuntimeData mapData = SystemAPI.GetSingleton<MapRuntimeData>();
 
             HordePressureConfig config = SystemAPI.GetSingleton<HordePressureConfig>();
+            if (config.MinSpeedFactor <= 0f && config.BackpressureK <= 0f)
+            {
+                config.MinSpeedFactor = 0.15f;
+                config.BackpressureK = 0.35f;
+                SystemAPI.SetSingleton(config);
+            }
+
             if (config.Enabled == 0)
             {
                 _frameIndex++;
@@ -139,6 +149,8 @@ namespace Project.Horde
             float targetUnitsPerCell = math.max(0f, config.TargetUnitsPerCell);
             float pressureStrength = math.max(0f, config.PressureStrength);
             float speedFractionCap = math.clamp(config.SpeedFractionCap, 0f, 1f);
+            float minSpeedFactor = math.clamp(config.MinSpeedFactor, 0f, 1f);
+            float backpressureK = math.max(0f, config.BackpressureK);
             float maxPushFromConfig = math.max(0f, config.MaxPushPerFrame) * deltaTime;
             float referenceMoveSpeed = 1f;
             float maxPushFromSpeed = referenceMoveSpeed * deltaTime * speedFractionCap;
@@ -212,6 +224,8 @@ namespace Project.Horde
                 PressureStrength = pressureStrength,
                 MaxPush = maxPushThisFrame,
                 SpeedFractionCap = speedFractionCap,
+                MinSpeedFactor = minSpeedFactor,
+                BackpressureK = backpressureK,
                 BlockedPenalty = blockedPenalty,
                 CenterWorld = mapData.CenterWorld,
                 DeltaTime = deltaTime
@@ -421,6 +435,8 @@ namespace Project.Horde
             public float PressureStrength;
             public float MaxPush;
             public float SpeedFractionCap;
+            public float MinSpeedFactor;
+            public float BackpressureK;
             public float BlockedPenalty;
             public float2 CenterWorld;
             public float DeltaTime;
@@ -457,37 +473,57 @@ namespace Project.Horde
                     return;
                 }
 
-                float2 direction = ResolvePressureDirection(cell, position, entityIndex, localPressure, ref flow);
-                float dirLenSq = math.lengthsq(direction);
-                if (dirLenSq <= Epsilon)
+                float moveStep = math.max(0f, moveSpeed.Value) * DeltaTime;
+                if (moveStep <= 0f)
                 {
                     return;
                 }
 
                 float2 flowDirection = ResolveFlowDirection(index, position, ref flow);
-                direction = RemoveBackwardComponent(direction, flowDirection);
-                dirLenSq = math.lengthsq(direction);
-                if (dirLenSq <= Epsilon)
+                float flowDirLenSq = math.lengthsq(flowDirection);
+                if (flowDirLenSq > Epsilon)
+                {
+                    flowDirection *= math.rsqrt(flowDirLenSq);
+                }
+                else
+                {
+                    flowDirection = float2.zero;
+                }
+
+                float speedFactor = 1f / (1f + (localPressure * BackpressureK));
+                speedFactor = math.clamp(speedFactor, MinSpeedFactor, 1f);
+                float backpressureStep = moveStep * (1f - speedFactor);
+
+                float2 pressureDelta = float2.zero;
+                float2 direction = ResolvePressureDirection(cell, position, entityIndex, localPressure, ref flow);
+                float dirLenSq = math.lengthsq(direction);
+                if (dirLenSq > Epsilon)
+                {
+                    direction = RemoveBackwardComponent(direction, flowDirection);
+                    dirLenSq = math.lengthsq(direction);
+                    if (dirLenSq > Epsilon)
+                    {
+                        direction *= math.rsqrt(dirLenSq);
+                        float rawPush = localPressure * PressureStrength * DeltaTime;
+                        float speedBudget = moveStep * SpeedFractionCap;
+                        float effectiveCap = math.min(MaxPush, speedBudget);
+                        if (effectiveCap > 0f)
+                        {
+                            float push = math.min(rawPush, effectiveCap);
+                            if (push > 0f)
+                            {
+                                pressureDelta = direction * push;
+                            }
+                        }
+                    }
+                }
+
+                float2 candidate = position + pressureDelta - (flowDirection * backpressureStep);
+                if (math.lengthsq(candidate - position) <= Epsilon)
                 {
                     return;
                 }
 
-                direction *= math.rsqrt(dirLenSq);
-                float rawPush = localPressure * PressureStrength * DeltaTime;
-                float speedBudget = math.max(0f, moveSpeed.Value) * DeltaTime * SpeedFractionCap;
-                float effectiveCap = math.min(MaxPush, speedBudget);
-                if (effectiveCap <= 0f)
-                {
-                    return;
-                }
-
-                float push = math.min(rawPush, effectiveCap);
-                if (push <= 0f)
-                {
-                    return;
-                }
-
-                float2 candidate = position + (direction * push);
                 if (!IsWalkableWorld(candidate, ref flow))
                 {
                     return;

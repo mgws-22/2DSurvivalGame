@@ -802,3 +802,12 @@
 ## 2026-02-21 - Data-driven tuning iteration (run data)
 - Raised `HordeSeparationConfig.MaxPushPerFrame` from `0.40` to `0.60` (units/second) and `InfluenceRadiusFactor` from `1.75` to `2.00`.
 - Reason: `[HordeTune]` overlap stayed far above target (>8%, trending to 100%), so Rule 1 was applied to increase soft separation authority and widen local neighbor response.
+
+## 2026-02-21 - Data-driven tuning iteration (run data 2)
+- Raised `HordeSeparationConfig.MaxPushPerFrame` from `0.60` to `0.75` (units/second, Rule 1).
+- Reason: overlap remained very high while `InfluenceRadiusFactor` was already at max `2.0`, so only soft cap was increased this pass.
+
+## 2026-02-21 - HordeTune cap log fix + minimal pressure backpressure
+- Updated `HordeTuningQuickMetricsSystem` logging to print `logIntervalSeconds` (window) and `simDt` (frame), and report per-frame caps (`sepCapFrame`, `pressureCapFrame`) computed from `simDt` plus raw config values.
+- Added minimal backpressure in `HordePressureFieldSystem` (`MinSpeedFactor=0.15`, `BackpressureK=0.35`) so high local pressure reduces net forward inflow toward the point target.
+- Purpose: keep diagnostics comparable with `HordeRuntimeDiag` and reduce runaway sink jamming over time without changing target semantics.

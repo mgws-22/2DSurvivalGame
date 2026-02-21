@@ -70,6 +70,8 @@ namespace Project.Horde
         public float PressureStrength;
         public float MaxPushPerFrame;
         public float SpeedFractionCap;
+        public float MinSpeedFactor;
+        public float BackpressureK;
         public float BlockedCellPenalty;
         public int FieldUpdateIntervalFrames;
         public int BlurPasses;
