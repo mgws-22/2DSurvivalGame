@@ -46,14 +46,24 @@ namespace Project.Horde
                 Entity configEntity = state.EntityManager.CreateEntity(typeof(HordeSeparationConfig));
                 state.EntityManager.SetComponentData(configEntity, new HordeSeparationConfig
                 {
-                    Radius = 0.1f,
-                    CellSizeFactor = 1.25f,
-                    InfluenceRadiusFactor = 1.5f,
-                    SeparationStrength = 0.7f,
-                    MaxPushPerFrame = 0.12f,
-                    MaxNeighbors = 24,
-                    Iterations = 1
+                    // Viktigt: detta måste matcha din sprite/world scale (halva diametern)
+                    Radius = 0.10f,
 
+                    CellSizeFactor = 1.25f,
+                    InfluenceRadiusFactor = 1.75f,
+
+                    // SeparationStrength: håll modest för att undvika jitter,
+                    // låt iterations + caps göra jobbet.
+                    SeparationStrength = 1.0f,
+
+                    // Se till att separation inte är "för snål" i trängsel.
+                    // Om du har global speed clamp (moveSpeed*dt) kan du sätta den högre.
+                    MaxPushPerFrame = 0.25f,
+
+                    MaxNeighbors = 24,
+
+                    // Punktmål + trängsel => 2 iterationer är ofta nyckeln
+                    Iterations = 2
                 });
             }
         }
@@ -89,18 +99,31 @@ namespace Project.Horde
         public void OnUpdate(ref SystemState state)
         {
             HordeSeparationConfig config = SystemAPI.GetSingleton<HordeSeparationConfig>();
+            float deltaTime = SystemAPI.Time.DeltaTime;
+            if (deltaTime <= 0f)
+            {
+                return;
+            }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             if (!s_loggedRuntimeDiagnostics)
             {
                 bool hasPressureConfig = SystemAPI.TryGetSingleton(out HordePressureConfig pressureConfig);
                 bool hasHardConfig = SystemAPI.TryGetSingleton(out HordeHardSeparationConfig hardConfig);
+                bool hasWallConfig = SystemAPI.TryGetSingleton(out WallRepulsionConfig wallConfig);
+                float referenceMoveSpeed = 1f;
+                float maxStep = referenceMoveSpeed * deltaTime;
+                float pressureMaxThisFrame = hasPressureConfig ? math.max(0f, pressureConfig.MaxPushPerFrame) * deltaTime : 0f;
+                float separationMaxThisFrame = math.max(0f, config.MaxPushPerFrame) * deltaTime;
+                float wallMaxThisFrame = hasWallConfig ? math.max(0f, wallConfig.MaxWallPushPerFrame) * deltaTime : 0f;
                 string order = "ZombieSteeringSystem -> HordePressureFieldSystem -> HordeSeparationSystem -> HordeHardSeparationSystem -> WallRepulsionSystem";
                 UnityEngine.Debug.Log(
                     $"[HordeRuntimeDiag] PressureEnabled={(hasPressureConfig ? pressureConfig.Enabled : (byte)0)} " +
                     $"DisablePairwiseWhenPressure={(hasPressureConfig ? pressureConfig.DisablePairwiseSeparationWhenPressureEnabled : (byte)0)} " +
                     $"SoftEnabled=1 SoftMaxNeighbors={config.MaxNeighbors} SoftIterations={config.Iterations} SoftMaxPushPerFrame={config.MaxPushPerFrame:F3} " +
                     $"HardEnabled={(hasHardConfig ? hardConfig.Enabled : (byte)0)} HardMaxNeighbors={(hasHardConfig ? hardConfig.MaxNeighbors : 0)} HardIterations={(hasHardConfig ? hardConfig.Iterations : 0)} " +
+                    $"dt={deltaTime:F4} RefMoveSpeed={referenceMoveSpeed:F2} RefMaxStep={maxStep:F4} " +
+                    $"PressureMaxThisFrame={pressureMaxThisFrame:F4} SeparationMaxThisFrame={separationMaxThisFrame:F4} WallMaxThisFrame={wallMaxThisFrame:F4} " +
                     $"Order={order}");
                 s_loggedRuntimeDiagnostics = true;
             }
@@ -120,7 +143,7 @@ namespace Project.Horde
             float influenceRadius = minDist * math.max(1f, config.InfluenceRadiusFactor);
             float influenceRadiusSq = influenceRadius * influenceRadius;
             float separationStrength = math.saturate(config.SeparationStrength);
-            float maxPush = math.max(0f, config.MaxPushPerFrame);
+            float maxPushThisFrame = math.max(0f, config.MaxPushPerFrame) * deltaTime;
             int maxNeighbors = math.clamp(config.MaxNeighbors, 4, 64);
             int iterations = math.clamp(config.Iterations, 1, 2);
             _localTransformLookup.Update(ref state);
@@ -169,11 +192,11 @@ namespace Project.Horde
                     MinDistSq = minDistSq,
                     MinDist = minDist,
                     InfluenceRadiusSq = influenceRadiusSq,
-                    MaxPush = maxPush,
+                    MaxPush = maxPushThisFrame,
                     SeparationStrength = separationStrength,
                     MaxNeighbors = maxNeighbors,
                     MoveSpeeds = _moveSpeeds.AsArray(),
-                    DeltaTime = SystemAPI.Time.DeltaTime,
+                    DeltaTime = deltaTime,
                     Iterations = iterations,
                     CurrentIteration = iteration
                 };
@@ -344,8 +367,9 @@ namespace Project.Horde
                     float2 softDelta = correction * SeparationStrength;
                     float softLenSq = math.lengthsq(softDelta);
                     float maxStepBySpeed = MoveSpeeds[index] * DeltaTime;
-                    float perIterationCap = maxStepBySpeed / math.max(1, Iterations);
-                    float effectiveMaxPush = math.min(MaxPush, perIterationCap);
+                    float perIterationSpeedCap = maxStepBySpeed / math.max(1, Iterations);
+                    float perIterationConfigCap = MaxPush / math.max(1, Iterations);
+                    float effectiveMaxPush = math.min(perIterationConfigCap, perIterationSpeedCap);
                     float maxPushSq = effectiveMaxPush * effectiveMaxPush;
                     if (softLenSq > maxPushSq && softLenSq > 0.000001f)
                     {

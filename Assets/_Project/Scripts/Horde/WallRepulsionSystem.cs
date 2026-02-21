@@ -37,6 +37,12 @@ namespace Project.Horde
 
         public void OnUpdate(ref SystemState state)
         {
+            float deltaTime = SystemAPI.Time.DeltaTime;
+            if (deltaTime <= 0f)
+            {
+                return;
+            }
+
             WallFieldSingleton wallSingleton = SystemAPI.GetSingleton<WallFieldSingleton>();
             if (!wallSingleton.Blob.IsCreated)
             {
@@ -54,9 +60,9 @@ namespace Project.Horde
                 Wall = wallSingleton.Blob,
                 UnitRadius = math.max(0.001f, config.UnitRadiusWorld),
                 WallPushStrength = math.max(0f, config.WallPushStrength),
-                MaxPush = math.max(0f, config.MaxWallPushPerFrame),
+                MaxPush = math.max(0f, config.MaxWallPushPerFrame) * deltaTime,
                 ProjectionRadius = math.clamp(config.ProjectionSearchRadiusCells, 1, 2),
-                DeltaTime = SystemAPI.Time.DeltaTime
+                DeltaTime = deltaTime
             };
 
             state.Dependency = job.ScheduleParallel(state.Dependency);
@@ -94,6 +100,7 @@ namespace Project.Horde
                 ref WallFieldBlob wall = ref Wall.Value;
                 if (!Walkable[index].IsWalkable)
                 {
+                    // Hard wall-safety correction: do not speed-cap projection out of blocked tiles.
                     pos = ProjectToNearestWalkable(cell, pos);
                     transform.Position = new float3(pos.x, pos.y, transform.Position.z);
                     return;
@@ -125,6 +132,7 @@ namespace Project.Horde
                     int nextIndex = Map.ToIndex(nextCell);
                     if (nextIndex >= 0 && nextIndex < Walkable.Length && !Walkable[nextIndex].IsWalkable)
                     {
+                        // Hard wall-safety correction remains uncapped.
                         pos = ProjectToNearestWalkable(nextCell, pos);
                     }
                 }

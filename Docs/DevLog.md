@@ -675,3 +675,31 @@
    - movement remains center-driven (no strong backward pressure drift),
    - units do not remain inside blocked cells after wall safety stage.
 4. Profile gameplay and confirm `GC Alloc` remains `0 B`.
+
+## 2026-02-21 - Push budgets converted to dt-normalized units/second
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`:
+  - `MaxPushPerFrame` is now interpreted as units/second and converted to per-frame budget (`MaxPushPerFrame * dt`).
+  - pressure clamp now effectively uses `min(MaxPushPerFrame * dt, moveSpeed * dt * SpeedFractionCap)`.
+- Updated `Assets/_Project/Scripts/Horde/HordeSeparationSystem.cs`:
+  - separation max correction budget now uses `MaxPushPerFrame * dt`.
+  - per-iteration cap now splits both config and moveSpeed budgets across iterations.
+  - one-time diagnostics log now includes `dt`, reference max step, and computed per-frame budgets for pressure/separation/wall.
+- Updated `Assets/_Project/Scripts/Horde/WallRepulsionSystem.cs`:
+  - wall soft push budget now uses `MaxWallPushPerFrame * dt`.
+  - blocked-cell projection remains uncapped hard safety correction.
+- Updated docs:
+  - `Docs/Systems/Horde/HordePressureField.md`
+  - `Docs/Systems/Horde/HordeSeparation.md`
+  - `Docs/Systems/Horde/WallRepulsion.md`
+
+### Why
+- Previous frame-based budget interpretation made crowd behavior FPS-dependent (not stable between ~60 and ~300 FPS).
+- Dt-normalized budgets preserve per-second behavior while keeping wall safety guarantees.
+
+### How to test
+1. Enter Play Mode with unlocked FPS and observe crowd behavior over time.
+2. Cap to ~60 FPS and compare over equal wall-clock time; spreading/jamming should be qualitatively similar.
+3. Confirm one diagnostics log appears and includes `dt` plus computed frame budgets.
+4. Verify no blocked-cell residency after wall safety stage and `GC Alloc` remains `0 B`.

@@ -20,7 +20,7 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
 5. Per zombie, samples local pressure gradient and pushes toward lower pressure.
 6. Adds deterministic per-entity spread bias in tie/symmetry cases so dense stacks do not move in perfect lockstep.
 7. Removes any backward component vs flow direction (`dot(pressureDir, flowDir) < 0` projected out).
-8. Push is speed-capped: `min(MaxPushPerFrame, moveSpeed * dt * SpeedFractionCap)`.
+8. Push is speed-capped using dt-normalized config budget: `min(MaxPushPerFrame * dt, moveSpeed * dt * SpeedFractionCap)`.
 9. Rejects pressure move if resulting position lands in a blocked expanded flow cell.
 
 ## Update Order
@@ -32,6 +32,7 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
 ## Invariants
 - No per-frame managed allocations in hot path.
 - Pressure field is always aligned to the same expanded grid as flow steering.
+- `MaxPushPerFrame` config is interpreted as units/second and converted to per-frame budget with `dt`.
 - Pressure push is bounded and cannot exceed configured speed fraction per frame.
 - Blocked-cell projection safety remains in wall repulsion, so units do not remain in blocked map cells.
 

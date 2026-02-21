@@ -38,13 +38,27 @@ namespace Project.Horde
                 state.EntityManager.SetComponentData(configEntity, new HordePressureConfig
                 {
                     Enabled = 1,
-                    TargetUnitsPerCell = 2f,
-                    PressureStrength = 10f,
-                    MaxPushPerFrame = 0.4f,
-                    SpeedFractionCap = 0.4f,
-                    BlockedCellPenalty = 3f,
+
+                    // Pressure aktiveras tidigt nog för att motverka jam vid punktmål
+                    TargetUnitsPerCell = 2.2f,
+
+                    // Mycket lägre än 10: pressure ska inte kännas som en separat motor
+                    PressureStrength = 0.50f,
+
+                    // Sätt högt så att SpeedFractionCap blir den verkliga begränsningen
+                    // (då blir beteendet mer förutsägbart)
+                    MaxPushPerFrame = 1.0f,
+
+                    // Pressure får bara använda en del av moveSpeed*dt-budgeten
+                    SpeedFractionCap = 0.25f,
+
+                    // Lägre för att undvika "väggmagnetism"
+                    BlockedCellPenalty = 3.0f,
+
                     FieldUpdateIntervalFrames = 1,
                     BlurPasses = 1,
+
+                    // Augment mode: körs tillsammans med separation
                     DisablePairwiseSeparationWhenPressureEnabled = 0
                 });
             }
@@ -76,6 +90,12 @@ namespace Project.Horde
 
         public void OnUpdate(ref SystemState state)
         {
+            float deltaTime = SystemAPI.Time.DeltaTime;
+            if (deltaTime <= 0f)
+            {
+                return;
+            }
+
             FlowFieldSingleton flowSingleton = SystemAPI.GetSingleton<FlowFieldSingleton>();
             if (!flowSingleton.Blob.IsCreated)
             {
@@ -108,7 +128,7 @@ namespace Project.Horde
 
             float targetUnitsPerCell = math.max(0f, config.TargetUnitsPerCell);
             float pressureStrength = math.max(0f, config.PressureStrength);
-            float maxPush = math.max(0f, config.MaxPushPerFrame);
+            float maxPushThisFrame = math.max(0f, config.MaxPushPerFrame) * deltaTime;
             float speedFractionCap = math.clamp(config.SpeedFractionCap, 0f, 1f);
             float blockedPenalty = math.max(0f, config.BlockedCellPenalty);
             int fieldInterval = math.clamp(config.FieldUpdateIntervalFrames, 1, 8);
@@ -166,11 +186,11 @@ namespace Project.Horde
                 Flow = flowSingleton.Blob,
                 Pressure = activePressure,
                 PressureStrength = pressureStrength,
-                MaxPush = maxPush,
+                MaxPush = maxPushThisFrame,
                 SpeedFractionCap = speedFractionCap,
                 BlockedPenalty = blockedPenalty,
                 CenterWorld = mapData.CenterWorld,
-                DeltaTime = SystemAPI.Time.DeltaTime
+                DeltaTime = deltaTime
             };
             state.Dependency = applyPressureJob.ScheduleParallel(dependency);
             _frameIndex++;

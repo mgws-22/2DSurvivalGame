@@ -14,7 +14,7 @@ Prevent zombies from being pushed into blocked map tiles under crowd pressure by
 1. For each zombie, map world position to map cell.
 2. If current cell is blocked, project to nearest point inside a nearby walkable cell (small radius search).
 3. If walkable and near wall (`wallDist * tileSize < unitRadius`), apply push along wall normal direction.
-4. Clamp soft wall push by `min(maxWallPushPerFrame, moveSpeed * dt)`.
+4. Clamp soft wall push by dt-normalized budget: `min(maxWallPushPerFrame * dt, moveSpeed * dt)`.
 5. Safety-check target cell; if blocked, project again with the same nearest-point strategy.
 
 ## Invariants
@@ -23,6 +23,7 @@ Prevent zombies from being pushed into blocked map tiles under crowd pressure by
 - Projection uses nearest point inside walkable cells (not center snap) to avoid corner launch/teleport artifacts.
 - No Unity Physics colliders/rigidbodies required.
 - Allocation-free per frame in hot path.
+- `MaxWallPushPerFrame` config is interpreted as units/second and converted to per-frame budget with `dt`.
 - Runs after pressure and both separation passes as final wall safety stage.
 
 ## Verification
