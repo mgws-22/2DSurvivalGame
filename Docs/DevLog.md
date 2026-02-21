@@ -1058,3 +1058,24 @@
 2. Confirm early/open windows still keep `backpressure active` near `0..5%`.
 3. Check if late-run overlap/jam escalation slows down (or peaks lower) versus previous run.
 4. Verify no new sync points and `GC Alloc = 0 B` in gameplay.
+
+## 2026-02-21 - Tuning iteration: sink-jam mitigation pass 2 (threshold split + stronger soft push)
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`:
+  - `TargetUnitsPerCell: 2.2 -> 2.0`
+  - `BackpressureThreshold: 3.5 -> 4.0`
+  - `BackpressureK: 0.30 -> 0.40`
+- Updated `Assets/_Project/Scripts/Horde/HordeSeparationSystem.cs`:
+  - `MaxPushPerFrame: 1.10 -> 1.30`
+
+### Why
+- Run still climbed from intermittent overlap (`14.3%`) to high overlap/jam (`100%/100%`) over sink stress windows.
+- Backpressure was active in moderate density windows (`42.9%`, then `57.1%+`), so threshold was raised to keep open and mid-density motion freer while increasing high-pressure braking slope.
+- Lower `TargetUnitsPerCell` engages pressure relief earlier, and higher separation cap increases local de-overlap authority at chokepoints.
+
+### How to test
+1. Run the same sink stress scenario and compare `[HordeTune]` trend windows over time.
+2. Confirm early and mid windows keep `backpressure active` low while `avgScale` stays closer to `1.0`.
+3. Check whether overlap and jam escalate slower and peak lower than the previous run.
+4. Verify no new sync points and `GC Alloc = 0 B` in gameplay.
