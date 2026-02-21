@@ -747,3 +747,25 @@
    - with `dt≈0.022`, `RefMoveSpeed=1`, `SpeedFractionCap=0.25`, effective cap is near `0.0055` when config budget is larger.
 3. Stress with 5k+ to 20k+ entities and confirm pressure density behavior is stable (no obvious random undercount artifacts).
 4. Profile and confirm `GC Alloc` remains `0 B`.
+
+## 2026-02-21 - Pressure density accumulation switched to per-thread bins + reduce (no unsafe)
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`:
+  - removed all `unsafe`/pointer-based density accumulation.
+  - added persistent `_densityPerThread` (`cellCount * workerCount`) and `_workerCount` (`JobsUtility.MaxJobThreadCount`).
+  - rebuild chain now does:
+    - clear `_densityPerThread`,
+    - parallel accumulate into per-thread slices using `[NativeSetThreadIndex]`,
+    - parallel reduce pass into final `_density`.
+  - kept the existing dependency chain scheduling (no `Complete()`).
+
+### Why
+- Needed thread-safe high-throughput density accumulation without enabling `/unsafe`.
+- Needed to keep accumulation parallel for large crowds (20k+) and avoid single-thread bottlenecks.
+
+### How to test
+1. Confirm project compiles with "Allow unsafe code" disabled.
+2. Run Play Mode with 5k+ to 20k+ units and ensure pressure behavior is stable.
+3. Check one-time runtime diag still prints pressure cap math values.
+4. Profile and verify `GC Alloc` remains `0 B` in gameplay loop.

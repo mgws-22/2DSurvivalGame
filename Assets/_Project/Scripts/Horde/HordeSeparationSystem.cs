@@ -58,7 +58,7 @@ namespace Project.Horde
 
                     // Se till att separation inte är "för snål" i trängsel.
                     // Om du har global speed clamp (moveSpeed*dt) kan du sätta den högre.
-                    MaxPushPerFrame = 0.25f,
+                    MaxPushPerFrame = 0.4f,
 
                     MaxNeighbors = 24,
 

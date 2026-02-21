@@ -13,8 +13,9 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
 ## Runtime Logic
 1. Uses `FlowFieldBlob` dimensions/origin/cell size (expanded map + spawn margin) as the pressure grid.
 2. Rebuilds density at configurable interval (`FieldUpdateIntervalFrames`):
-   - clear persistent density array
-   - accumulate units per walkable expanded cell using atomic increments (`Interlocked.Increment` on density cell pointer) so accumulation is thread-safe under parallel jobs
+   - clear persistent per-thread density bins (`cellCount * workerCount`)
+   - accumulate units in parallel where each worker writes only to its own bin slice (`threadIndex * cellCount + cellIndex`)
+   - reduce per-thread bins into final density array (`sum worker slices per cell`)
 3. Converts density to pressure (`max(0, density - TargetUnitsPerCell)`), with blocked expanded cells assigned a high penalty.
 4. Optional bounded blur passes (`0..2`) smooth pressure to reduce jitter and improve corridor behavior.
 5. Per zombie, samples local pressure gradient and pushes toward lower pressure.
@@ -36,6 +37,7 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
 - One-frame pressure config budget is `MaxPushPerFrame * dt`.
 - One-frame pressure speed budget is `moveSpeed * dt * SpeedFractionCap`.
 - Effective pressure cap per unit is `min(configBudget, speedBudget)`.
+- Density accumulation is parallel and race-free without `unsafe` code by using per-thread bins plus a reduce pass.
 - Pressure push is bounded and cannot exceed configured speed fraction per frame.
 - Blocked-cell projection safety remains in wall repulsion, so units do not remain in blocked map cells.
 

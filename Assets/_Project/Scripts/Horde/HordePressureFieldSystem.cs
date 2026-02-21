@@ -1,8 +1,10 @@
 using Project.Map;
 using Unity.Burst;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Jobs;
+using Unity.Jobs.LowLevel.Unsafe;
 using Unity.Mathematics;
 using Unity.Transforms;
 
@@ -18,6 +20,8 @@ namespace Project.Horde
         private const float Diagonal = 0.70710677f;
 
         private NativeArray<int> _density;
+        private NativeArray<int> _densityPerThread;
+        private int _workerCount;
         private NativeArray<float> _pressureA;
         private NativeArray<float> _pressureB;
         private int _cellCount;
@@ -73,6 +77,11 @@ namespace Project.Horde
                 _density.Dispose();
             }
 
+            if (_densityPerThread.IsCreated)
+            {
+                _densityPerThread.Dispose();
+            }
+
             if (_pressureA.IsCreated)
             {
                 _pressureA.Dispose();
@@ -84,6 +93,7 @@ namespace Project.Horde
             }
 
             _cellCount = 0;
+            _workerCount = 0;
             _frameIndex = 0;
             _activePressureBuffer = 0;
         }
@@ -120,7 +130,7 @@ namespace Project.Horde
             }
 
             bool resized = EnsureFieldSize(cellCount);
-            if (!_density.IsCreated || !_pressureA.IsCreated || !_pressureB.IsCreated)
+            if (!_density.IsCreated || !_densityPerThread.IsCreated || !_pressureA.IsCreated || !_pressureB.IsCreated)
             {
                 _frameIndex++;
                 return;
@@ -143,22 +153,29 @@ namespace Project.Horde
 
             if (shouldRebuild)
             {
-                ClearIntArrayJob clearDensityJob = new ClearIntArrayJob
+                ClearIntArrayJob clearDensityPerThreadJob = new ClearIntArrayJob
                 {
-                    Values = _density
+                    Values = _densityPerThread
                 };
-                dependency = clearDensityJob.Schedule(cellCount, 256, dependency);
+                dependency = clearDensityPerThreadJob.Schedule(_densityPerThread.Length, 256, dependency);
 
-                unsafe
+                AccumulateDensityJob accumulateDensityJob = new AccumulateDensityJob
                 {
-                    AccumulateDensityJob accumulateDensityJob = new AccumulateDensityJob
-                    {
-                        DensityPtr = (int*)NativeArrayUnsafeUtility.GetUnsafePtr(_density),
-                        DensityLength = _density.Length,
-                        Flow = flowSingleton.Blob
-                    };
-                    dependency = accumulateDensityJob.ScheduleParallel(dependency);
-                }
+                    DensityPerThread = _densityPerThread,
+                    CellCount = cellCount,
+                    WorkerCount = _workerCount,
+                    Flow = flowSingleton.Blob
+                };
+                dependency = accumulateDensityJob.ScheduleParallel(dependency);
+
+                ReduceDensityJob reduceDensityJob = new ReduceDensityJob
+                {
+                    DensityPerThread = _densityPerThread,
+                    Density = _density,
+                    CellCount = cellCount,
+                    WorkerCount = _workerCount
+                };
+                dependency = reduceDensityJob.Schedule(cellCount, 256, dependency);
 
                 BuildPressureJob buildPressureJob = new BuildPressureJob
                 {
@@ -205,7 +222,7 @@ namespace Project.Horde
 
         private bool EnsureFieldSize(int cellCount)
         {
-            if (_cellCount == cellCount && _density.IsCreated && _pressureA.IsCreated && _pressureB.IsCreated)
+            if (_cellCount == cellCount && _workerCount > 0 && _density.IsCreated && _densityPerThread.IsCreated && _pressureA.IsCreated && _pressureB.IsCreated)
             {
                 return false;
             }
@@ -213,6 +230,11 @@ namespace Project.Horde
             if (_density.IsCreated)
             {
                 _density.Dispose();
+            }
+
+            if (_densityPerThread.IsCreated)
+            {
+                _densityPerThread.Dispose();
             }
 
             if (_pressureA.IsCreated)
@@ -226,6 +248,8 @@ namespace Project.Horde
             }
 
             _density = new NativeArray<int>(cellCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _workerCount = math.max(1, JobsUtility.MaxJobThreadCount);
+            _densityPerThread = new NativeArray<int>(cellCount * _workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _pressureA = new NativeArray<float>(cellCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _pressureB = new NativeArray<float>(cellCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _cellCount = cellCount;
@@ -245,11 +269,13 @@ namespace Project.Horde
         }
 
         [BurstCompile]
-        private unsafe partial struct AccumulateDensityJob : IJobEntity
+        private partial struct AccumulateDensityJob : IJobEntity
         {
-            [NativeDisableUnsafePtrRestriction] public int* DensityPtr;
-            public int DensityLength;
+            [NativeDisableParallelForRestriction] public NativeArray<int> DensityPerThread;
+            public int CellCount;
+            public int WorkerCount;
             [ReadOnly] public BlobAssetReference<FlowFieldBlob> Flow;
+            [NativeSetThreadIndex] public int ThreadIndex;
 
             private void Execute(in LocalTransform transform, in ZombieTag tag)
             {
@@ -260,18 +286,40 @@ namespace Project.Horde
                     return;
                 }
 
-                int index = cell.x + (cell.y * flow.Width);
-                if (index < 0 || index >= DensityLength)
+                int cellIndex = cell.x + (cell.y * flow.Width);
+                if (cellIndex < 0 || cellIndex >= CellCount)
                 {
                     return;
                 }
 
-                if (flow.Dist[index] == ushort.MaxValue)
+                if (flow.Dist[cellIndex] == ushort.MaxValue)
                 {
                     return;
                 }
 
-                Interlocked.Increment(ref UnsafeUtility.AsRef<int>(DensityPtr + index));
+                int workerIndex = math.clamp(ThreadIndex - 1, 0, WorkerCount - 1);
+                int localIndex = (workerIndex * CellCount) + cellIndex;
+                DensityPerThread[localIndex] = DensityPerThread[localIndex] + 1;
+            }
+        }
+
+        [BurstCompile]
+        private struct ReduceDensityJob : IJobParallelFor
+        {
+            [ReadOnly] public NativeArray<int> DensityPerThread;
+            public NativeArray<int> Density;
+            public int CellCount;
+            public int WorkerCount;
+
+            public void Execute(int cellIndex)
+            {
+                int sum = 0;
+                for (int worker = 0; worker < WorkerCount; worker++)
+                {
+                    sum += DensityPerThread[(worker * CellCount) + cellIndex];
+                }
+
+                Density[cellIndex] = sum;
             }
         }
 
