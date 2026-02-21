@@ -1016,3 +1016,24 @@
 5. Profiler watchlist:
    - gameplay `GC Alloc = 0 B`
    - no new sync spikes from `Complete()`.
+
+## 2026-02-21 - Tuning iteration: reduce small-crowd slowdown, keep sink handling
+
+### What changed
+- Updated pressure/backpressure defaults in `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`:
+  - `BackpressureThreshold: 2.0 -> 3.0`
+  - `BackpressureK: 0.35 -> 0.20`
+  - `MinSpeedFactor: 0.20 -> 0.30`
+- Updated separation defaults in `Assets/_Project/Scripts/Horde/HordeSeparationSystem.cs`:
+  - `MaxNeighbors: 24 -> 32`
+  - `MaxPushPerFrame: 0.75 -> 0.90`
+
+### Why
+- Run data showed early slowdown in smaller/non-jammed samples (`jam=0` while backpressure became active and avgScale dropped), so backpressure engagement was too aggressive.
+- Late-run sink stress also showed high overlap, so soft separation authority was raised moderately without changing algorithm/order.
+
+### How to test
+1. Run same scenario and compare `[HordeTune]` windows before/after.
+2. Confirm free/small-crowd windows keep `backpressure active` near `0..5%`.
+3. Confirm average speed and `avgScale` remain closer to `1.0` before hard congestion.
+4. In sink stress, verify overlap/jam trend improves or at least does not worsen while no new sync points appear.

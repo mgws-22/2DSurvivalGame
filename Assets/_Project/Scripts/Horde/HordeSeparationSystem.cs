@@ -58,9 +58,9 @@ namespace Project.Horde
 
                     // Se till att separation inte är "för snål" i trängsel.
                     // Om du har global speed clamp (moveSpeed*dt) kan du sätta den högre.
-                    MaxPushPerFrame = 0.75f, // tuning: Rule1 run-2, raise soft authority for persistent high overlap
+                    MaxPushPerFrame = 0.90f, // tuning: Rule1 run-2, raise soft authority for persistent high overlap
 
-                    MaxNeighbors = 24,
+                    MaxNeighbors = 32,
 
                     // Punktmål + trängsel => 2 iterationer är ofta nyckeln
                     Iterations = 2

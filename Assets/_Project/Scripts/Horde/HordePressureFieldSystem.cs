@@ -61,9 +61,9 @@ namespace Project.Horde
                     SpeedFractionCap = 0.25f,
 
                     // Tuning rule: keep free-flow speed at 1.0 until pressure exceeds threshold.
-                    BackpressureThreshold = 2.0f,
-                    MinSpeedFactor = 0.20f,
-                    BackpressureK = 0.35f,
+                    BackpressureThreshold = 3.0f,
+                    MinSpeedFactor = 0.30f,
+                    BackpressureK = 0.20f,
                     BackpressureMaxFactor = 1.0f,
 
                     // Lägre för att undvika "väggmagnetism"
@@ -145,19 +145,19 @@ namespace Project.Horde
             bool changedDefaults = false;
             if (config.BackpressureThreshold <= 0f)
             {
-                config.BackpressureThreshold = 2.0f;
+                config.BackpressureThreshold = 3.0f;
                 changedDefaults = true;
             }
 
             if (config.BackpressureK <= 0f)
             {
-                config.BackpressureK = 0.35f;
+                config.BackpressureK = 0.20f;
                 changedDefaults = true;
             }
 
             if (config.MinSpeedFactor <= 0f)
             {
-                config.MinSpeedFactor = 0.20f;
+                config.MinSpeedFactor = 0.30f;
                 changedDefaults = true;
             }
 
