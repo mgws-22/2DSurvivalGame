@@ -1037,3 +1037,24 @@
 2. Confirm free/small-crowd windows keep `backpressure active` near `0..5%`.
 3. Confirm average speed and `avgScale` remain closer to `1.0` before hard congestion.
 4. In sink stress, verify overlap/jam trend improves or at least does not worsen while no new sync points appear.
+
+## 2026-02-21 - Tuning iteration: sink-jam mitigation (overlap+jam climb)
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`:
+  - `PressureStrength: 0.50 -> 0.60`
+  - `SpeedFractionCap: 0.25 -> 0.30`
+  - `BackpressureThreshold: 3.0 -> 3.5`
+  - `BackpressureK: 0.20 -> 0.30`
+- Updated `Assets/_Project/Scripts/Horde/HordeSeparationSystem.cs`:
+  - `MaxPushPerFrame: 0.90 -> 1.10`
+
+### Why
+- Open-space behavior was already healthy (`backpressure active ~0%`), but sink stress still escalated into high overlap/jam with saturated low speed.
+- This pass increases macro pressure relief + soft separation authority while keeping backpressure less eager in moderate congestion and still strong in high pressure.
+
+### How to test
+1. Re-run same sink stress scenario and compare `[HordeTune]` trends over time.
+2. Confirm early/open windows still keep `backpressure active` near `0..5%`.
+3. Check if late-run overlap/jam escalation slows down (or peaks lower) versus previous run.
+4. Verify no new sync points and `GC Alloc = 0 B` in gameplay.
