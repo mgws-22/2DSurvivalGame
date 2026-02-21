@@ -22,10 +22,9 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
 6. Adds deterministic per-entity spread bias in tie/symmetry cases so dense stacks do not move in perfect lockstep.
 7. Removes any backward component vs flow direction (`dot(pressureDir, flowDir) < 0` projected out).
 8. Push is speed-capped using dt-normalized config budget: `min(MaxPushPerFrame * dt, moveSpeed * dt * SpeedFractionCap)`.
-9. Applies minimal backpressure against flow in dense cells:
-   - `speedFactor = clamp(1 / (1 + BackpressureK * localPressure), MinSpeedFactor, 1)`
-   - net backward step along flow is `moveSpeed * dt * (1 - speedFactor)`
-10. Rejects pressure/backpressure move if resulting position lands in a blocked expanded flow cell.
+9. Resizes the singleton `PressureCell` buffer on the main thread only when cell count changes, before scheduling publish.
+10. Publishes the active pressure grid to the resized buffer in a dedicated job (`BufferLookup<PressureCell>`), where the job writes values only (no length/capacity changes).
+11. Rejects pressure move if resulting position lands in a blocked expanded flow cell.
 
 ## Update Order
 - Runs after `ZombieSteeringSystem`.
@@ -40,9 +39,11 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
 - One-frame pressure config budget is `MaxPushPerFrame * dt`.
 - One-frame pressure speed budget is `moveSpeed * dt * SpeedFractionCap`.
 - Effective pressure cap per unit is `min(configBudget, speedBudget)`.
-- Backpressure tuning fields:
-  - `MinSpeedFactor` (default `0.15`)
+- Backpressure tuning fields (consumed by `ZombieSteeringSystem`):
+  - `BackpressureThreshold` (default `1.5`)
   - `BackpressureK` (default `0.35`)
+  - `MinSpeedFactor` (default `0.20`)
+  - `BackpressureMaxFactor` (default `1.0`)
 - Density accumulation is parallel and race-free without `unsafe` code by using per-thread bins plus a reduce pass.
 - Pressure push is bounded and cannot exceed configured speed fraction per frame.
 - Blocked-cell projection safety remains in wall repulsion, so units do not remain in blocked map cells.
@@ -53,6 +54,7 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
   - pressure apply: `O(N)` with constant-size neighborhood samples
 - Uses persistent `NativeArray` buffers reused across frames.
 - No structural entity changes and no manual sync points.
+- No `Complete()` sync points; publish copy stays scheduled/jobified.
 
 ## Verification
 1. Enter Play Mode in `Assets/Scenes/SampleScene.unity` with large spawn counts.

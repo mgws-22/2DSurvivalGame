@@ -22,15 +22,22 @@ namespace Project.Map
 
         public void OnDestroy(ref SystemState state)
         {
-            if (SystemAPI.TryGetSingleton(out WallFieldSingleton singleton) && singleton.Blob.IsCreated)
+            EntityQuery wallQuery = state.GetEntityQuery(ComponentType.ReadOnly<WallFieldSingleton>());
+            if (!wallQuery.IsEmptyIgnoreFilter)
             {
-                singleton.Blob.Dispose();
+                Entity singletonEntity = wallQuery.GetSingletonEntity();
+                WallFieldSingleton singleton = state.EntityManager.GetComponentData<WallFieldSingleton>(singletonEntity);
+                if (singleton.Blob.IsCreated)
+                {
+                    singleton.Blob.Dispose();
+                }
             }
         }
 
         public void OnUpdate(ref SystemState state)
         {
-            Entity mapEntity = SystemAPI.GetSingletonEntity<MapRuntimeData>();
+            EntityQuery mapQuery = state.GetEntityQuery(ComponentType.ReadOnly<MapRuntimeData>());
+            Entity mapEntity = mapQuery.GetSingletonEntity();
             if (!state.EntityManager.HasComponent<WallFieldDirtyTag>(mapEntity))
             {
                 return;

@@ -14,6 +14,7 @@ namespace Project.Horde
     [UpdateAfter(typeof(ZombieSteeringSystem))]
     [UpdateBefore(typeof(HordeSeparationSystem))]
     [UpdateBefore(typeof(HordeHardSeparationSystem))]
+    [UpdateBefore(typeof(HordeTuningQuickMetricsSystem))]
     public partial struct HordePressureFieldSystem : ISystem
     {
         private const float Epsilon = 1e-6f;
@@ -27,6 +28,7 @@ namespace Project.Horde
         private int _cellCount;
         private int _frameIndex;
         private byte _activePressureBuffer;
+        private Entity _pressureFieldEntity;
 
         public void OnCreate(ref SystemState state)
         {
@@ -43,31 +45,49 @@ namespace Project.Horde
                 {
                     Enabled = 1,
 
-                    // Pressure aktiveras tidigt nog fˆr att motverka jam vid punktmÂl
+                    // Pressure aktiveras tidigt nog f√∂r att motverka jam vid punktm√•l
                     TargetUnitsPerCell = 2.2f,
 
-                    // Mycket l‰gre ‰n 10: pressure ska inte k‰nnas som en separat motor
+                    // Mycket l√§gre √§n 10: pressure ska inte k√§nnas som en separat motor
                     PressureStrength = 0.50f,
 
-                    // S‰tt hˆgt sÂ att SpeedFractionCap blir den verkliga begr‰nsningen
-                    // (dÂ blir beteendet mer fˆruts‰gbart)
+                    // S√§tt h√∂gt s√• att SpeedFractionCap blir den verkliga begr√§nsningen
+                    // (d√• blir beteendet mer f√∂ruts√§gbart)
                     MaxPushPerFrame = 1.0f,
 
-                    // Pressure fÂr bara anv‰nda en del av moveSpeed*dt-budgeten
+                    // Pressure f√•r bara anv√§nda en del av moveSpeed*dt-budgeten
                     SpeedFractionCap = 0.25f,
 
-                    MinSpeedFactor = 0.15f,
+                    // Tuning rule: keep free-flow speed at 1.0 until pressure exceeds threshold.
+                    BackpressureThreshold = 1.5f,
+                    MinSpeedFactor = 0.20f,
                     BackpressureK = 0.35f,
+                    BackpressureMaxFactor = 1.0f,
 
-                    // L‰gre fˆr att undvika "v‰ggmagnetism"
+                    // L√§gre f√∂r att undvika "v√§ggmagnetism"
                     BlockedCellPenalty = 3.0f,
 
                     FieldUpdateIntervalFrames = 1,
                     BlurPasses = 1,
 
-                    // Augment mode: kˆrs tillsammans med separation
+                    // Augment mode: k√∂rs tillsammans med separation
                     DisablePairwiseSeparationWhenPressureEnabled = 0
                 });
+            }
+
+            EntityQuery pressureBufferQuery = state.GetEntityQuery(ComponentType.ReadWrite<PressureFieldBufferTag>());
+            if (pressureBufferQuery.IsEmptyIgnoreFilter)
+            {
+                _pressureFieldEntity = state.EntityManager.CreateEntity(typeof(PressureFieldBufferTag));
+            }
+            else
+            {
+                _pressureFieldEntity = pressureBufferQuery.GetSingletonEntity();
+            }
+
+            if (!state.EntityManager.HasBuffer<PressureCell>(_pressureFieldEntity))
+            {
+                state.EntityManager.AddBuffer<PressureCell>(_pressureFieldEntity);
             }
 
             state.RequireForUpdate<HordePressureConfig>();
@@ -99,6 +119,7 @@ namespace Project.Horde
             _workerCount = 0;
             _frameIndex = 0;
             _activePressureBuffer = 0;
+            _pressureFieldEntity = Entity.Null;
         }
 
         public void OnUpdate(ref SystemState state)
@@ -118,10 +139,33 @@ namespace Project.Horde
             MapRuntimeData mapData = SystemAPI.GetSingleton<MapRuntimeData>();
 
             HordePressureConfig config = SystemAPI.GetSingleton<HordePressureConfig>();
-            if (config.MinSpeedFactor <= 0f && config.BackpressureK <= 0f)
+            bool changedDefaults = false;
+            if (config.BackpressureThreshold <= 0f)
             {
-                config.MinSpeedFactor = 0.15f;
+                config.BackpressureThreshold = 1.5f;
+                changedDefaults = true;
+            }
+
+            if (config.BackpressureK <= 0f)
+            {
                 config.BackpressureK = 0.35f;
+                changedDefaults = true;
+            }
+
+            if (config.MinSpeedFactor <= 0f)
+            {
+                config.MinSpeedFactor = 0.20f;
+                changedDefaults = true;
+            }
+
+            if (config.BackpressureMaxFactor <= 0f)
+            {
+                config.BackpressureMaxFactor = 1.0f;
+                changedDefaults = true;
+            }
+
+            if (changedDefaults)
+            {
                 SystemAPI.SetSingleton(config);
             }
 
@@ -149,8 +193,6 @@ namespace Project.Horde
             float targetUnitsPerCell = math.max(0f, config.TargetUnitsPerCell);
             float pressureStrength = math.max(0f, config.PressureStrength);
             float speedFractionCap = math.clamp(config.SpeedFractionCap, 0f, 1f);
-            float minSpeedFactor = math.clamp(config.MinSpeedFactor, 0f, 1f);
-            float backpressureK = math.max(0f, config.BackpressureK);
             float maxPushFromConfig = math.max(0f, config.MaxPushPerFrame) * deltaTime;
             float referenceMoveSpeed = 1f;
             float maxPushFromSpeed = referenceMoveSpeed * deltaTime * speedFractionCap;
@@ -162,6 +204,25 @@ namespace Project.Horde
 
             JobHandle dependency = state.Dependency;
             NativeArray<float> activePressure = _activePressureBuffer == 0 ? _pressureA : _pressureB;
+
+            if (_pressureFieldEntity == Entity.Null || !state.EntityManager.Exists(_pressureFieldEntity))
+            {
+                EntityQuery pressureBufferQuery = state.GetEntityQuery(ComponentType.ReadWrite<PressureFieldBufferTag>());
+                if (pressureBufferQuery.IsEmptyIgnoreFilter)
+                {
+                    _pressureFieldEntity = state.EntityManager.CreateEntity(typeof(PressureFieldBufferTag));
+                }
+                else
+                {
+                    _pressureFieldEntity = pressureBufferQuery.GetSingletonEntity();
+                }
+
+                if (!state.EntityManager.HasBuffer<PressureCell>(_pressureFieldEntity))
+                {
+                    state.EntityManager.AddBuffer<PressureCell>(_pressureFieldEntity);
+                }
+
+            }
 
             if (shouldRebuild)
             {
@@ -217,6 +278,24 @@ namespace Project.Horde
                 activePressure = readIsA ? _pressureA : _pressureB;
             }
 
+            if (_pressureFieldEntity != Entity.Null && state.EntityManager.Exists(_pressureFieldEntity) && shouldRebuild)
+            {
+                DynamicBuffer<PressureCell> pressureBuffer = state.EntityManager.GetBuffer<PressureCell>(_pressureFieldEntity);
+                if (pressureBuffer.Length != cellCount)
+                {
+                    pressureBuffer.ResizeUninitialized(cellCount);
+                }
+
+                BufferLookup<PressureCell> pressureLookup = state.GetBufferLookup<PressureCell>(false);
+                PublishPressureToBufferJob publishPressureJob = new PublishPressureToBufferJob
+                {
+                    Source = activePressure,
+                    PressureLookup = pressureLookup,
+                    PressureEntity = _pressureFieldEntity
+                };
+                dependency = publishPressureJob.Schedule(dependency);
+            }
+
             ApplyPressureJob applyPressureJob = new ApplyPressureJob
             {
                 Flow = flowSingleton.Blob,
@@ -224,8 +303,6 @@ namespace Project.Horde
                 PressureStrength = pressureStrength,
                 MaxPush = maxPushThisFrame,
                 SpeedFractionCap = speedFractionCap,
-                MinSpeedFactor = minSpeedFactor,
-                BackpressureK = backpressureK,
                 BlockedPenalty = blockedPenalty,
                 CenterWorld = mapData.CenterWorld,
                 DeltaTime = deltaTime
@@ -338,6 +415,29 @@ namespace Project.Horde
         }
 
         [BurstCompile]
+        private struct PublishPressureToBufferJob : IJob
+        {
+            [ReadOnly] public NativeArray<float> Source;
+            public BufferLookup<PressureCell> PressureLookup;
+            public Entity PressureEntity;
+
+            public void Execute()
+            {
+                if (!PressureLookup.HasBuffer(PressureEntity))
+                {
+                    return;
+                }
+
+                DynamicBuffer<PressureCell> buffer = PressureLookup[PressureEntity];
+                int count = math.min(Source.Length, buffer.Length);
+                for (int i = 0; i < count; i++)
+                {
+                    buffer[i] = new PressureCell { Value = Source[i] };
+                }
+            }
+        }
+
+        [BurstCompile]
         private struct BuildPressureJob : IJobParallelFor
         {
             [ReadOnly] public NativeArray<int> Density;
@@ -435,8 +535,6 @@ namespace Project.Horde
             public float PressureStrength;
             public float MaxPush;
             public float SpeedFractionCap;
-            public float MinSpeedFactor;
-            public float BackpressureK;
             public float BlockedPenalty;
             public float2 CenterWorld;
             public float DeltaTime;
@@ -490,10 +588,6 @@ namespace Project.Horde
                     flowDirection = float2.zero;
                 }
 
-                float speedFactor = 1f / (1f + (localPressure * BackpressureK));
-                speedFactor = math.clamp(speedFactor, MinSpeedFactor, 1f);
-                float backpressureStep = moveStep * (1f - speedFactor);
-
                 float2 pressureDelta = float2.zero;
                 float2 direction = ResolvePressureDirection(cell, position, entityIndex, localPressure, ref flow);
                 float dirLenSq = math.lengthsq(direction);
@@ -518,7 +612,7 @@ namespace Project.Horde
                     }
                 }
 
-                float2 candidate = position + pressureDelta - (flowDirection * backpressureStep);
+                float2 candidate = position + pressureDelta;
                 if (math.lengthsq(candidate - position) <= Epsilon)
                 {
                     return;

@@ -1,3 +1,4 @@
+using Project.Map;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
@@ -13,6 +14,8 @@ namespace Project.Horde
     [UpdateAfter(typeof(WallRepulsionSystem))]
     public partial struct HordeTuningQuickMetricsSystem : ISystem
     {
+        private const int SpeedHistogramBins = 32;
+        private const float SpeedHistogramMax = 2f;
         private static bool s_loggedConfigOnce;
 
         private EntityQuery _zombieQuery;
@@ -30,6 +33,16 @@ namespace Project.Horde
         private NativeArray<int> _sampledPerThread;
         private NativeArray<int> _overlapPerThread;
         private NativeArray<int> _jamPerThread;
+        private NativeArray<int> _speedSamplesPerThread;
+        private NativeArray<int> _backpressureActivePerThread;
+        private NativeArray<float> _speedSumPerThread;
+        private NativeArray<float> _speedFractionSumPerThread;
+        private NativeArray<float> _speedScaleSumPerThread;
+        private NativeArray<float> _speedMinPerThread;
+        private NativeArray<float> _speedMaxPerThread;
+        private NativeArray<float> _speedScaleMinPerThread;
+        private NativeArray<int> _speedHistogramPerThread;
+        private NativeArray<int> _speedHistogramReduced;
         private ComponentLookup<HordeTuningQuickMetrics> _metricsLookup;
 
         public void OnCreate(ref SystemState state)
@@ -48,6 +61,16 @@ namespace Project.Horde
             _sampledPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _overlapPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _jamPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _speedSamplesPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _backpressureActivePerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _speedSumPerThread = new NativeArray<float>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _speedFractionSumPerThread = new NativeArray<float>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _speedScaleSumPerThread = new NativeArray<float>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _speedMinPerThread = new NativeArray<float>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _speedMaxPerThread = new NativeArray<float>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _speedScaleMinPerThread = new NativeArray<float>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _speedHistogramPerThread = new NativeArray<int>(_workerCount * SpeedHistogramBins, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _speedHistogramReduced = new NativeArray<int>(SpeedHistogramBins, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _metricsLookup = state.GetComponentLookup<HordeTuningQuickMetrics>(false);
 
             EntityQuery configQuery = state.GetEntityQuery(ComponentType.ReadWrite<HordeTuningQuickConfig>());
@@ -83,6 +106,7 @@ namespace Project.Horde
             state.RequireForUpdate<HordeSeparationConfig>();
             state.RequireForUpdate<HordePressureConfig>();
             state.RequireForUpdate<HordeTuningQuickMetrics>();
+            state.RequireForUpdate<FlowFieldSingleton>();
         }
 
         public void OnDestroy(ref SystemState state)
@@ -126,6 +150,56 @@ namespace Project.Horde
             {
                 _jamPerThread.Dispose();
             }
+
+            if (_speedSamplesPerThread.IsCreated)
+            {
+                _speedSamplesPerThread.Dispose();
+            }
+
+            if (_backpressureActivePerThread.IsCreated)
+            {
+                _backpressureActivePerThread.Dispose();
+            }
+
+            if (_speedSumPerThread.IsCreated)
+            {
+                _speedSumPerThread.Dispose();
+            }
+
+            if (_speedFractionSumPerThread.IsCreated)
+            {
+                _speedFractionSumPerThread.Dispose();
+            }
+
+            if (_speedScaleSumPerThread.IsCreated)
+            {
+                _speedScaleSumPerThread.Dispose();
+            }
+
+            if (_speedMinPerThread.IsCreated)
+            {
+                _speedMinPerThread.Dispose();
+            }
+
+            if (_speedMaxPerThread.IsCreated)
+            {
+                _speedMaxPerThread.Dispose();
+            }
+
+            if (_speedScaleMinPerThread.IsCreated)
+            {
+                _speedScaleMinPerThread.Dispose();
+            }
+
+            if (_speedHistogramPerThread.IsCreated)
+            {
+                _speedHistogramPerThread.Dispose();
+            }
+
+            if (_speedHistogramReduced.IsCreated)
+            {
+                _speedHistogramReduced.Dispose();
+            }
         }
 
         public void OnUpdate(ref SystemState state)
@@ -151,7 +225,8 @@ namespace Project.Horde
             {
                 UnityEngine.Debug.Log(
                     $"[HordeTune] cfg targetUnits={pressureConfig.TargetUnitsPerCell:F2} pressureSpeedFractionCap={pressureConfig.SpeedFractionCap:F2} " +
-                    $"pressureMaxPushPerFrame={pressureConfig.MaxPushPerFrame:F2} minSpeedFactor={pressureConfig.MinSpeedFactor:F2} backpressureK={pressureConfig.BackpressureK:F2} " +
+                    $"pressureMaxPushPerFrame={pressureConfig.MaxPushPerFrame:F2} backpressureThreshold={pressureConfig.BackpressureThreshold:F2} " +
+                    $"minSpeedFactor={pressureConfig.MinSpeedFactor:F2} maxSpeedFactor={pressureConfig.BackpressureMaxFactor:F2} backpressureK={pressureConfig.BackpressureK:F2} " +
                     $"sepMaxPushPerFrame={separationConfig.MaxPushPerFrame:F2} sepIterations={separationConfig.Iterations} radius={separationConfig.Radius:F3} " +
                     $"logEveryFrames={quickConfig.LogEveryNFrames} sampleStride={quickConfig.SampleStride}");
                 s_loggedConfigOnce = true;
@@ -171,11 +246,16 @@ namespace Project.Horde
 
                 float overlapPct = metrics.Sampled > 0 ? (100f * metrics.OverlapHits / metrics.Sampled) : 0f;
                 float jamPct = metrics.Sampled > 0 ? (100f * metrics.JamHits / metrics.Sampled) : 0f;
+                float activeBackpressurePct = metrics.Sampled > 0 ? (100f * metrics.BackpressureActiveHits / metrics.Sampled) : 0f;
 
                 UnityEngine.Debug.Log(
                     $"[HordeTune] logIntervalSeconds={logIntervalSeconds:F4} simDt={simDt:F4} sampled={metrics.Sampled} overlap={overlapPct:F1}% jam={jamPct:F1}% " +
+                    $"speed(avg={metrics.AvgSpeed:F2} p50={metrics.P50Speed:F2} p90={metrics.P90Speed:F2} min={metrics.MinSpeed:F2} max={metrics.MaxSpeed:F2}) " +
+                    $"frac(avg={metrics.AvgSpeedFraction:F2}) " +
+                    $"backpressure(active={activeBackpressurePct:F1}% avgScale={metrics.AvgSpeedScale:F2} minScale={metrics.MinSpeedScale:F2}) " +
                     $"sepCapFrame={separationCap:F4} pressureCapFrame={pressureEffectiveCap:F4} " +
                     $"sepMaxPushPerFrame={separationConfig.MaxPushPerFrame:F3} pressureMaxPushPerFrame={pressureConfig.MaxPushPerFrame:F3} pressureSpeedFractionCap={pressureConfig.SpeedFractionCap:F2} " +
+                    $"backpressureThreshold={pressureConfig.BackpressureThreshold:F2} backpressureK={pressureConfig.BackpressureK:F2} " +
                     $"radius={math.max(0.001f, separationConfig.Radius):F3}");
 
                 _pendingMetricsLog = false;
@@ -208,6 +288,24 @@ namespace Project.Horde
             float targetUnitsPerCell = math.max(0f, pressureConfig.TargetUnitsPerCell);
             float dtWindowForSpeed = math.max(deltaTime, _elapsedSinceTick);
             _elapsedSinceTick = 0f;
+            float backpressureThreshold = math.max(0f, pressureConfig.BackpressureThreshold);
+            float backpressureK = math.max(0f, pressureConfig.BackpressureK);
+            float minSpeedFactor = math.clamp(pressureConfig.MinSpeedFactor, 0f, 1f);
+            float maxSpeedFactor = math.clamp(pressureConfig.BackpressureMaxFactor, 0f, 1f);
+            if (maxSpeedFactor < minSpeedFactor)
+            {
+                maxSpeedFactor = minSpeedFactor;
+            }
+
+            FlowFieldSingleton flowSingleton = SystemAPI.GetSingleton<FlowFieldSingleton>();
+            if (!flowSingleton.Blob.IsCreated)
+            {
+                return;
+            }
+
+            Entity pressureFieldEntity = Entity.Null;
+            bool hasPressureFieldEntity = SystemAPI.TryGetSingletonEntity<PressureFieldBufferTag>(out pressureFieldEntity);
+            BufferLookup<PressureCell> pressureLookup = state.GetBufferLookup<PressureCell>(true);
 
             EnsureCapacity(count, sampleStride);
             _entities.ResizeUninitialized(count);
@@ -242,7 +340,17 @@ namespace Project.Horde
             {
                 Sampled = _sampledPerThread,
                 Overlap = _overlapPerThread,
-                Jam = _jamPerThread
+                Jam = _jamPerThread,
+                SpeedSamples = _speedSamplesPerThread,
+                BackpressureActive = _backpressureActivePerThread,
+                SpeedSum = _speedSumPerThread,
+                SpeedFractionSum = _speedFractionSumPerThread,
+                SpeedScaleSum = _speedScaleSumPerThread,
+                SpeedMin = _speedMinPerThread,
+                SpeedMax = _speedMaxPerThread,
+                SpeedScaleMin = _speedScaleMinPerThread,
+                SpeedHistogram = _speedHistogramPerThread,
+                HistogramBins = SpeedHistogramBins
             };
             dependency = clearCountersJob.Schedule(_workerCount, 64, dependency);
 
@@ -256,6 +364,19 @@ namespace Project.Horde
                 SampledPerThread = _sampledPerThread,
                 OverlapPerThread = _overlapPerThread,
                 JamPerThread = _jamPerThread,
+                SpeedSamplesPerThread = _speedSamplesPerThread,
+                BackpressureActivePerThread = _backpressureActivePerThread,
+                SpeedSumPerThread = _speedSumPerThread,
+                SpeedFractionSumPerThread = _speedFractionSumPerThread,
+                SpeedScaleSumPerThread = _speedScaleSumPerThread,
+                SpeedMinPerThread = _speedMinPerThread,
+                SpeedMaxPerThread = _speedMaxPerThread,
+                SpeedScaleMinPerThread = _speedScaleMinPerThread,
+                SpeedHistogramPerThread = _speedHistogramPerThread,
+                PressureLookup = pressureLookup,
+                PressureFieldEntity = pressureFieldEntity,
+                HasPressureFieldEntity = hasPressureFieldEntity ? (byte)1 : (byte)0,
+                Flow = flowSingleton.Blob,
                 InvCellSize = invCellSize,
                 MinDistSq = minDistSq,
                 InfluenceRadiusSq = influenceRadiusSq,
@@ -264,6 +385,13 @@ namespace Project.Horde
                 TargetUnitsPerCell = targetUnitsPerCell,
                 DeltaTimeWindow = dtWindowForSpeed,
                 SpeedThresholdFactor = 0.2f,
+                SpeedHistogramBins = SpeedHistogramBins,
+                SpeedHistogramMax = SpeedHistogramMax,
+                BackpressureThreshold = backpressureThreshold,
+                BackpressureK = backpressureK,
+                MinSpeedFactor = minSpeedFactor,
+                MaxSpeedFactor = maxSpeedFactor,
+                PressureEnabled = pressureConfig.Enabled,
                 WorkerCount = _workerCount
             };
             dependency = evaluateJob.Schedule(count, 128, dependency);
@@ -274,9 +402,21 @@ namespace Project.Horde
                 SampledPerThread = _sampledPerThread,
                 OverlapPerThread = _overlapPerThread,
                 JamPerThread = _jamPerThread,
+                SpeedSamplesPerThread = _speedSamplesPerThread,
+                BackpressureActivePerThread = _backpressureActivePerThread,
+                SpeedSumPerThread = _speedSumPerThread,
+                SpeedFractionSumPerThread = _speedFractionSumPerThread,
+                SpeedScaleSumPerThread = _speedScaleSumPerThread,
+                SpeedMinPerThread = _speedMinPerThread,
+                SpeedMaxPerThread = _speedMaxPerThread,
+                SpeedScaleMinPerThread = _speedScaleMinPerThread,
+                SpeedHistogramPerThread = _speedHistogramPerThread,
+                ReducedHistogram = _speedHistogramReduced,
                 MetricsLookup = _metricsLookup,
                 MetricsEntity = _metricsEntity,
                 Dt = dtWindowForSpeed,
+                HistogramBins = SpeedHistogramBins,
+                SpeedHistogramMax = SpeedHistogramMax,
                 WorkerCount = _workerCount
             };
             dependency = reduceJob.Schedule(dependency);
@@ -372,12 +512,36 @@ namespace Project.Horde
             public NativeArray<int> Sampled;
             public NativeArray<int> Overlap;
             public NativeArray<int> Jam;
+            public NativeArray<int> SpeedSamples;
+            public NativeArray<int> BackpressureActive;
+            public NativeArray<float> SpeedSum;
+            public NativeArray<float> SpeedFractionSum;
+            public NativeArray<float> SpeedScaleSum;
+            public NativeArray<float> SpeedMin;
+            public NativeArray<float> SpeedMax;
+            public NativeArray<float> SpeedScaleMin;
+            public NativeArray<int> SpeedHistogram;
+            public int HistogramBins;
 
             public void Execute(int index)
             {
                 Sampled[index] = 0;
                 Overlap[index] = 0;
                 Jam[index] = 0;
+                SpeedSamples[index] = 0;
+                BackpressureActive[index] = 0;
+                SpeedSum[index] = 0f;
+                SpeedFractionSum[index] = 0f;
+                SpeedScaleSum[index] = 0f;
+                SpeedMin[index] = float.MaxValue;
+                SpeedMax[index] = 0f;
+                SpeedScaleMin[index] = 1f;
+
+                int histBase = index * HistogramBins;
+                for (int i = 0; i < HistogramBins; i++)
+                {
+                    SpeedHistogram[histBase + i] = 0;
+                }
             }
         }
 
@@ -392,6 +556,19 @@ namespace Project.Horde
             [NativeDisableParallelForRestriction] public NativeArray<int> SampledPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<int> OverlapPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<int> JamPerThread;
+            [NativeDisableParallelForRestriction] public NativeArray<int> SpeedSamplesPerThread;
+            [NativeDisableParallelForRestriction] public NativeArray<int> BackpressureActivePerThread;
+            [NativeDisableParallelForRestriction] public NativeArray<float> SpeedSumPerThread;
+            [NativeDisableParallelForRestriction] public NativeArray<float> SpeedFractionSumPerThread;
+            [NativeDisableParallelForRestriction] public NativeArray<float> SpeedScaleSumPerThread;
+            [NativeDisableParallelForRestriction] public NativeArray<float> SpeedMinPerThread;
+            [NativeDisableParallelForRestriction] public NativeArray<float> SpeedMaxPerThread;
+            [NativeDisableParallelForRestriction] public NativeArray<float> SpeedScaleMinPerThread;
+            [NativeDisableParallelForRestriction] public NativeArray<int> SpeedHistogramPerThread;
+            [NativeDisableParallelForRestriction][ReadOnly] public BufferLookup<PressureCell> PressureLookup;
+            public Entity PressureFieldEntity;
+            public byte HasPressureFieldEntity;
+            [ReadOnly] public BlobAssetReference<FlowFieldBlob> Flow;
             [NativeSetThreadIndex] public int ThreadIndex;
             public float InvCellSize;
             public float MinDistSq;
@@ -401,6 +578,13 @@ namespace Project.Horde
             public float TargetUnitsPerCell;
             public float DeltaTimeWindow;
             public float SpeedThresholdFactor;
+            public int SpeedHistogramBins;
+            public float SpeedHistogramMax;
+            public float BackpressureThreshold;
+            public float BackpressureK;
+            public float MinSpeedFactor;
+            public float MaxSpeedFactor;
+            public byte PressureEnabled;
             public int WorkerCount;
 
             public void Execute(int index)
@@ -476,6 +660,15 @@ namespace Project.Horde
                     OverlapPerThread[workerIndex] = OverlapPerThread[workerIndex] + 1;
                 }
 
+                float localPressure = ResolveLocalPressure(pos);
+                float speedScale = ComputeSpeedScale(localPressure);
+                SpeedScaleSumPerThread[workerIndex] = SpeedScaleSumPerThread[workerIndex] + speedScale;
+                SpeedScaleMinPerThread[workerIndex] = math.min(SpeedScaleMinPerThread[workerIndex], speedScale);
+                if (speedScale < 0.99f)
+                {
+                    BackpressureActivePerThread[workerIndex] = BackpressureActivePerThread[workerIndex] + 1;
+                }
+
                 bool dense = (1f + localNeighbors) >= TargetUnitsPerCell;
                 bool slow = false;
                 Entity entity = Entities[index];
@@ -483,13 +676,73 @@ namespace Project.Horde
                 {
                     float dist = math.distance(pos, previousPos);
                     float speed = dist / math.max(1e-5f, DeltaTimeWindow);
+                    float speedFraction = speed / math.max(1e-5f, MoveSpeeds[index]);
                     slow = speed < (MoveSpeeds[index] * SpeedThresholdFactor);
+
+                    SpeedSamplesPerThread[workerIndex] = SpeedSamplesPerThread[workerIndex] + 1;
+                    SpeedSumPerThread[workerIndex] = SpeedSumPerThread[workerIndex] + speed;
+                    SpeedFractionSumPerThread[workerIndex] = SpeedFractionSumPerThread[workerIndex] + speedFraction;
+                    SpeedMinPerThread[workerIndex] = math.min(SpeedMinPerThread[workerIndex], speed);
+                    SpeedMaxPerThread[workerIndex] = math.max(SpeedMaxPerThread[workerIndex], speed);
+
+                    float clampedSpeed = math.clamp(speed, 0f, SpeedHistogramMax);
+                    int speedBin = (int)math.floor((clampedSpeed / SpeedHistogramMax) * (SpeedHistogramBins - 1));
+                    speedBin = math.clamp(speedBin, 0, SpeedHistogramBins - 1);
+                    int histIndex = (workerIndex * SpeedHistogramBins) + speedBin;
+                    SpeedHistogramPerThread[histIndex] = SpeedHistogramPerThread[histIndex] + 1;
                 }
 
                 if (slow && dense)
                 {
                     JamPerThread[workerIndex] = JamPerThread[workerIndex] + 1;
                 }
+            }
+
+            private float ResolveLocalPressure(float2 worldPosition)
+            {
+                if (PressureEnabled == 0 || HasPressureFieldEntity == 0 || !Flow.IsCreated)
+                {
+                    return 0f;
+                }
+
+                ref FlowFieldBlob flow = ref Flow.Value;
+                int2 flowCell = WorldToFlowGrid(worldPosition, ref flow);
+                if (flowCell.x < 0 || flowCell.y < 0 || flowCell.x >= flow.Width || flowCell.y >= flow.Height)
+                {
+                    return 0f;
+                }
+
+                int flowIndex = flowCell.x + (flowCell.y * flow.Width);
+                if (!PressureLookup.HasBuffer(PressureFieldEntity))
+                {
+                    return 0f;
+                }
+
+                DynamicBuffer<PressureCell> pressureBuffer = PressureLookup[PressureFieldEntity];
+                if (flowIndex < 0 || flowIndex >= pressureBuffer.Length)
+                {
+                    return 0f;
+                }
+
+                return pressureBuffer[flowIndex].Value;
+            }
+
+            private float ComputeSpeedScale(float localPressure)
+            {
+                if (PressureEnabled == 0)
+                {
+                    return MaxSpeedFactor;
+                }
+
+                float excess = math.max(0f, localPressure - BackpressureThreshold);
+                float speedScaleRaw = 1f / (1f + (BackpressureK * excess));
+                return math.clamp(speedScaleRaw, MinSpeedFactor, MaxSpeedFactor);
+            }
+
+            private static int2 WorldToFlowGrid(float2 world, ref FlowFieldBlob flow)
+            {
+                float2 local = (world - flow.OriginWorld) / flow.CellSize;
+                return (int2)math.floor(local);
             }
         }
 
@@ -499,9 +752,21 @@ namespace Project.Horde
             [ReadOnly] public NativeArray<int> SampledPerThread;
             [ReadOnly] public NativeArray<int> OverlapPerThread;
             [ReadOnly] public NativeArray<int> JamPerThread;
+            [ReadOnly] public NativeArray<int> SpeedSamplesPerThread;
+            [ReadOnly] public NativeArray<int> BackpressureActivePerThread;
+            [ReadOnly] public NativeArray<float> SpeedSumPerThread;
+            [ReadOnly] public NativeArray<float> SpeedFractionSumPerThread;
+            [ReadOnly] public NativeArray<float> SpeedScaleSumPerThread;
+            [ReadOnly] public NativeArray<float> SpeedMinPerThread;
+            [ReadOnly] public NativeArray<float> SpeedMaxPerThread;
+            [ReadOnly] public NativeArray<float> SpeedScaleMinPerThread;
+            [ReadOnly] public NativeArray<int> SpeedHistogramPerThread;
+            [NativeDisableParallelForRestriction] public NativeArray<int> ReducedHistogram;
             [NativeDisableParallelForRestriction] public ComponentLookup<HordeTuningQuickMetrics> MetricsLookup;
             public Entity MetricsEntity;
             public float Dt;
+            public int HistogramBins;
+            public float SpeedHistogramMax;
             public int WorkerCount;
 
             public void Execute()
@@ -514,11 +779,54 @@ namespace Project.Horde
                 int sampled = 0;
                 int overlap = 0;
                 int jam = 0;
+                int speedSamples = 0;
+                int backpressureActive = 0;
+                float speedSum = 0f;
+                float speedFractionSum = 0f;
+                float speedScaleSum = 0f;
+                float minSpeed = float.MaxValue;
+                float maxSpeed = 0f;
+                float minSpeedScale = 1f;
+
+                int totalHistogramLength = WorkerCount * HistogramBins;
+                for (int i = 0; i < HistogramBins; i++)
+                {
+                    ReducedHistogram[i] = 0;
+                }
+
                 for (int i = 0; i < WorkerCount; i++)
                 {
                     sampled += SampledPerThread[i];
                     overlap += OverlapPerThread[i];
                     jam += JamPerThread[i];
+                    speedSamples += SpeedSamplesPerThread[i];
+                    backpressureActive += BackpressureActivePerThread[i];
+                    speedSum += SpeedSumPerThread[i];
+                    speedFractionSum += SpeedFractionSumPerThread[i];
+                    speedScaleSum += SpeedScaleSumPerThread[i];
+                    minSpeed = math.min(minSpeed, SpeedMinPerThread[i]);
+                    maxSpeed = math.max(maxSpeed, SpeedMaxPerThread[i]);
+                    minSpeedScale = math.min(minSpeedScale, SpeedScaleMinPerThread[i]);
+                }
+
+                for (int i = 0; i < totalHistogramLength; i++)
+                {
+                    int bin = i % HistogramBins;
+                    ReducedHistogram[bin] = ReducedHistogram[bin] + SpeedHistogramPerThread[i];
+                }
+
+                float p50Speed = ResolvePercentile(ReducedHistogram, speedSamples, 0.50f);
+                float p90Speed = ResolvePercentile(ReducedHistogram, speedSamples, 0.90f);
+                float avgSpeed = speedSamples > 0 ? (speedSum / speedSamples) : 0f;
+                float avgSpeedFraction = speedSamples > 0 ? (speedFractionSum / speedSamples) : 0f;
+                float avgSpeedScale = sampled > 0 ? (speedScaleSum / sampled) : 1f;
+                if (speedSamples <= 0)
+                {
+                    minSpeed = 0f;
+                }
+                if (sampled <= 0)
+                {
+                    minSpeedScale = 1f;
                 }
 
                 MetricsLookup[MetricsEntity] = new HordeTuningQuickMetrics
@@ -526,8 +834,40 @@ namespace Project.Horde
                     Sampled = sampled,
                     OverlapHits = overlap,
                     JamHits = jam,
-                    Dt = Dt
+                    SpeedSamples = speedSamples,
+                    BackpressureActiveHits = backpressureActive,
+                    Dt = Dt,
+                    AvgSpeed = avgSpeed,
+                    P50Speed = p50Speed,
+                    P90Speed = p90Speed,
+                    MinSpeed = minSpeed,
+                    MaxSpeed = maxSpeed,
+                    AvgSpeedFraction = avgSpeedFraction,
+                    AvgSpeedScale = avgSpeedScale,
+                    MinSpeedScale = minSpeedScale
                 };
+            }
+
+            private float ResolvePercentile(NativeArray<int> histogram, int sampleCount, float percentile)
+            {
+                if (sampleCount <= 0 || HistogramBins <= 0)
+                {
+                    return 0f;
+                }
+
+                int target = math.max(1, (int)math.ceil(sampleCount * percentile));
+                int cumulative = 0;
+                for (int i = 0; i < HistogramBins; i++)
+                {
+                    cumulative += histogram[i];
+                    if (cumulative >= target)
+                    {
+                        float t = HistogramBins > 1 ? ((float)i / (HistogramBins - 1)) : 0f;
+                        return t * SpeedHistogramMax;
+                    }
+                }
+
+                return SpeedHistogramMax;
             }
         }
 

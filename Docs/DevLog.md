@@ -811,3 +811,103 @@
 - Updated `HordeTuningQuickMetricsSystem` logging to print `logIntervalSeconds` (window) and `simDt` (frame), and report per-frame caps (`sepCapFrame`, `pressureCapFrame`) computed from `simDt` plus raw config values.
 - Added minimal backpressure in `HordePressureFieldSystem` (`MinSpeedFactor=0.15`, `BackpressureK=0.35`) so high local pressure reduces net forward inflow toward the point target.
 - Purpose: keep diagnostics comparable with `HordeRuntimeDiag` and reduce runaway sink jamming over time without changing target semantics.
+
+## 2026-02-21 - Backpressure threshold/ramp in steering + richer HordeTune metrics
+
+### What changed
+- Moved backpressure speed scaling to steering (instead of pressure displacement):
+  - `Assets/_Project/Scripts/Horde/ZombieSteeringSystem.cs`
+  - uses local pressure with threshold+ramp formula:
+    - `excess = max(0, localPressure - BackpressureThreshold)`
+    - `speedScale = clamp(1 / (1 + BackpressureK * excess), MinSpeedFactor, BackpressureMaxFactor)`
+- Published active pressure grid to ECS buffer for read-only consumers:
+  - `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`
+  - `PressureFieldBufferTag` + `DynamicBuffer<PressureCell>` updated when pressure field rebuilds.
+- Extended quick tuning metrics with speed/backpressure stats:
+  - `Assets/_Project/Scripts/Horde/HordeTuningQuickMetricsSystem.cs`
+  - `Assets/_Project/Scripts/Horde/ZombieComponents.cs`
+  - added sampled speed stats (`avg/p50/p90/min/max`), speed fraction average, backpressure active%, avg/min speed scale.
+
+### Why
+- Prevent global slowdown in normal flow and only apply slowdown in truly congested cells.
+- Make tuning data directly explainable: overlap/jam + observed speed + backpressure activity in one line.
+
+### How to test
+1. Enter Play Mode with point-target stress scenario.
+2. Confirm `[HordeTune]` now prints `speed(...)`, `frac(...)`, and `backpressure(active=... avgScale=... minScale=...)`.
+3. In open areas verify `backpressure(active=...)` is near 0%.
+4. In chokepoint jams verify `backpressure(active=...)` rises and `avgScale` drops while units still move toward center.
+5. Profiler check: gameplay `GC Alloc` remains `0 B`.
+
+## 2026-02-21 - Fix: Pressure buffer publish race (CopyFloatArrayJob safety)
+
+### What changed
+- Replaced direct main-thread `DynamicBuffer<PressureCell>` write scheduling with a dedicated publish job using `BufferLookup<PressureCell>`:
+  - `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`
+- Updated pressure consumers to fetch pressure buffer via read-only `BufferLookup<PressureCell>`:
+  - `Assets/_Project/Scripts/Horde/ZombieSteeringSystem.cs`
+  - `Assets/_Project/Scripts/Horde/HordeTuningQuickMetricsSystem.cs`
+- Added rare resize guard: if pressure grid cell count changes, buffer is resized once before publish.
+
+### Why
+- Prevent `InvalidOperationException` safety conflicts between scheduled pressure-buffer writer jobs and subsequent buffer access in later systems.
+
+### How to test
+1. Enter Play Mode and run with pressure enabled.
+2. Verify no `CopyFloatArrayJob` / `PressureCell` safety exceptions occur.
+3. Confirm steering + HordeTune still receive pressure data.
+4. Profiler: gameplay loop remains `GC Alloc = 0 B`.
+
+## 2026-02-21 - Fix: remove PressureCell main-thread access + keep publish fully scheduled
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`:
+  - removed `state.Dependency.Complete()` from pressure publish path.
+  - moved `PressureCell` buffer resize into `PublishPressureToBufferJob` so resize+copy happen in one scheduled writer job.
+  - added `[UpdateBefore(typeof(HordeTuningQuickMetricsSystem))]` to make ordering explicit.
+- Updated `Assets/_Project/Scripts/Horde/HordeTuningQuickMetricsSystem.cs`:
+  - removed main-thread pressure buffer indexing.
+  - metrics now read pressure only inside `EvaluateQuickMetricsJob` via read-only `BufferLookup<PressureCell>`.
+- Updated `Assets/_Project/Scripts/Horde/ZombieSteeringSystem.cs`:
+  - removed main-thread pressure buffer indexing.
+  - steering now reads pressure only inside `ZombieSteeringJob` via read-only `BufferLookup<PressureCell>`.
+- Updated docs:
+  - `Docs/Systems/Horde/HordePressureField.md`
+  - `Docs/Systems/Horde/HordeTuningQuickMetrics.md`
+  - `Docs/Systems/Horde/ZombieSteering.md`
+
+### Why
+- Eliminates `InvalidOperationException` caused by touching `PressureCell` from main thread while publish job writes were still in-flight.
+- Keeps the entire pressure write/read path dependency-chained and Burst/job-friendly without sync points.
+
+### How to test
+1. Open `Assets/Scenes/SampleScene.unity` and enter Play Mode.
+2. Run with pressure enabled and verify no `InvalidOperationException` mentioning `CopyFloatArrayJob` / `PressureCell`.
+3. Confirm steering still reacts to congestion and `[HordeTune]` logs still include backpressure metrics.
+4. Profiler watchlist:
+   - `GC Alloc` remains `0 B` in gameplay.
+   - no new main-thread sync spikes from `Complete()`.
+
+## 2026-02-21 - Fix: main-thread buffer resize + job-only publish writes
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`:
+  - `DynamicBuffer<PressureCell>.ResizeUninitialized` is now done on main thread before scheduling publish job.
+  - `PublishPressureToBufferJob` no longer changes buffer length/capacity; it only copies values.
+- Kept pressure consumers job-side only via read-only `BufferLookup<PressureCell>`:
+  - `Assets/_Project/Scripts/Horde/ZombieSteeringSystem.cs`
+  - `Assets/_Project/Scripts/Horde/HordeTuningQuickMetricsSystem.cs`
+- Updated pressure system doc:
+  - `Docs/Systems/Horde/HordePressureField.md`
+
+### Why
+- Enforces ECS safety pattern where dynamic buffer structural size changes happen on main thread, while content copy remains scheduled.
+- Keeps dependency chaining intact and avoids introducing any `Complete()` sync points.
+
+### How to test
+1. Enter Play Mode in `Assets/Scenes/SampleScene.unity`.
+2. Verify no `InvalidOperationException` involving `CopyFloatArrayJob` / `PressureCell`.
+3. Confirm pressure still affects steering and quick metrics still read pressure.
+4. Profiler watchlist:
+   - gameplay `GC Alloc = 0 B`
+   - no new `Complete()` sync spikes.

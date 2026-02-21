@@ -19,6 +19,7 @@ namespace Project.Horde
             state.RequireForUpdate<MapRuntimeData>();
             state.RequireForUpdate<FlowFieldSingleton>();
             state.RequireForUpdate<ZombieTag>();
+            state.RequireForUpdate<HordePressureConfig>();
         }
 
         [BurstCompile]
@@ -37,11 +38,33 @@ namespace Project.Horde
                 return;
             }
 
+            HordePressureConfig pressureConfig = SystemAPI.GetSingleton<HordePressureConfig>();
+            Entity pressureFieldEntity = Entity.Null;
+            bool hasPressureFieldEntity = SystemAPI.TryGetSingletonEntity<PressureFieldBufferTag>(out pressureFieldEntity);
+            BufferLookup<PressureCell> pressureLookup = state.GetBufferLookup<PressureCell>(true);
+
+            float backpressureThreshold = math.max(0f, pressureConfig.BackpressureThreshold);
+            float backpressureK = math.max(0f, pressureConfig.BackpressureK);
+            float minSpeedFactor = math.clamp(pressureConfig.MinSpeedFactor, 0f, 1f);
+            float maxSpeedFactor = math.clamp(pressureConfig.BackpressureMaxFactor, 0f, 1f);
+            if (maxSpeedFactor < minSpeedFactor)
+            {
+                maxSpeedFactor = minSpeedFactor;
+            }
+
             ZombieSteeringJob job = new ZombieSteeringJob
             {
                 DeltaTime = deltaTime,
                 MapData = mapData,
-                Flow = flowSingleton.Blob
+                Flow = flowSingleton.Blob,
+                PressureLookup = pressureLookup,
+                PressureFieldEntity = pressureFieldEntity,
+                HasPressureFieldEntity = hasPressureFieldEntity ? (byte)1 : (byte)0,
+                PressureEnabled = pressureConfig.Enabled,
+                BackpressureThreshold = backpressureThreshold,
+                BackpressureK = backpressureK,
+                MinSpeedFactor = minSpeedFactor,
+                MaxSpeedFactor = maxSpeedFactor
             };
 
             state.Dependency = job.ScheduleParallel(state.Dependency);
@@ -53,11 +76,20 @@ namespace Project.Horde
             public float DeltaTime;
             public MapRuntimeData MapData;
             [ReadOnly] public BlobAssetReference<FlowFieldBlob> Flow;
+            [ReadOnly] public BufferLookup<PressureCell> PressureLookup;
+            public Entity PressureFieldEntity;
+            public byte HasPressureFieldEntity;
+            public byte PressureEnabled;
+            public float BackpressureThreshold;
+            public float BackpressureK;
+            public float MinSpeedFactor;
+            public float MaxSpeedFactor;
 
             private void Execute(ref LocalTransform transform, ref ZombieSteeringState steeringState, in ZombieMoveSpeed moveSpeed, in ZombieTag tag)
             {
                 float2 position = transform.Position.xy;
-                float stepDistance = moveSpeed.Value * DeltaTime;
+                float speedScale = ResolveBackpressureSpeedScale(position);
+                float stepDistance = moveSpeed.Value * DeltaTime * speedScale;
                 if (stepDistance <= 0f)
                 {
                     return;
@@ -79,6 +111,39 @@ namespace Project.Horde
 
                 transform.Position = new float3(nextPosition.x, nextPosition.y, transform.Position.z);
                 steeringState.LastDirection = desiredDirection;
+            }
+
+            private float ResolveBackpressureSpeedScale(float2 position)
+            {
+                if (PressureEnabled == 0 || HasPressureFieldEntity == 0)
+                {
+                    return MaxSpeedFactor;
+                }
+
+                ref FlowFieldBlob flow = ref Flow.Value;
+                int2 grid = WorldToFlowGrid(position, ref flow);
+                if (!IsInFlowBounds(grid, ref flow))
+                {
+                    return MaxSpeedFactor;
+                }
+
+                int flowIndex = grid.x + (grid.y * flow.Width);
+                if (!PressureLookup.HasBuffer(PressureFieldEntity))
+                {
+                    return MaxSpeedFactor;
+                }
+
+                DynamicBuffer<PressureCell> pressureBuffer = PressureLookup[PressureFieldEntity];
+                if (flowIndex < 0 || flowIndex >= pressureBuffer.Length)
+                {
+                    return MaxSpeedFactor;
+                }
+
+                float localPressure = pressureBuffer[flowIndex].Value;
+                // No slowdown below threshold; only ramp down when congestion pressure exceeds it.
+                float excess = math.max(0f, localPressure - BackpressureThreshold);
+                float rawScale = 1f / (1f + (BackpressureK * excess));
+                return math.clamp(rawScale, MinSpeedFactor, MaxSpeedFactor);
             }
 
             private float2 ResolveDesiredDirection(float2 position)
