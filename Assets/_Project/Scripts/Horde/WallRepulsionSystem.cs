@@ -86,46 +86,47 @@ namespace Project.Horde
             {
                 float2 pos = transform.Position.xy;
                 int2 cell = Map.WorldToGrid(pos);
-                if (!Map.IsInMap(cell))
-                {
-                    return;
-                }
-
-                int index = Map.ToIndex(cell);
-                if (index < 0 || index >= Walkable.Length)
-                {
-                    return;
-                }
-
                 ref WallFieldBlob wall = ref Wall.Value;
-                if (!Walkable[index].IsWalkable)
-                {
-                    // Hard wall-safety correction: do not speed-cap projection out of blocked tiles.
-                    pos = ProjectToNearestWalkable(cell, pos);
-                    transform.Position = new float3(pos.x, pos.y, transform.Position.z);
-                    return;
-                }
 
-                if (index >= wall.Dist.Length || index >= wall.Dir.Length)
+                if (Map.IsInMap(cell))
                 {
-                    return;
-                }
-
-                float d = wall.Dist[index] == ushort.MaxValue ? float.MaxValue : wall.Dist[index] * wall.CellSize;
-                if (d < UnitRadius)
-                {
-                    byte dir = wall.Dir[index];
-                    if (dir < wall.DirLut.Length)
+                    int index = Map.ToIndex(cell);
+                    if (index < 0 || index >= Walkable.Length)
                     {
-                        float2 n = wall.DirLut[dir];
-                        float push = (UnitRadius - d) * WallPushStrength;
-                        float maxStepBySpeed = math.max(0f, moveSpeed.Value) * DeltaTime;
-                        float effectiveMaxPush = math.min(MaxPush, maxStepBySpeed);
-                        push = math.min(push, effectiveMaxPush);
-                        pos += n * push;
+                        return;
+                    }
+
+                    if (!Walkable[index].IsWalkable)
+                    {
+                        // Hard wall-safety correction: do not speed-cap projection out of blocked tiles.
+                        pos = ProjectToNearestWalkable(cell, pos);
+                        transform.Position = new float3(pos.x, pos.y, transform.Position.z);
+                        return;
                     }
                 }
 
+                int2 wallCell = WorldToWallGrid(pos, ref wall);
+                if (IsInWallBounds(wallCell, ref wall))
+                {
+                    int wallIndex = wallCell.x + (wallCell.y * wall.Width);
+                    if (wallIndex >= 0 && wallIndex < wall.Dist.Length && wallIndex < wall.Dir.Length)
+                    {
+                        float d = wall.Dist[wallIndex] == ushort.MaxValue ? float.MaxValue : wall.Dist[wallIndex] * wall.CellSize;
+                        if (d < UnitRadius)
+                        {
+                            byte dir = wall.Dir[wallIndex];
+                            if (dir < wall.DirLut.Length)
+                            {
+                                float2 n = wall.DirLut[dir];
+                                float push = (UnitRadius - d) * WallPushStrength;
+                                float maxStepBySpeed = math.max(0f, moveSpeed.Value) * DeltaTime;
+                                float effectiveMaxPush = math.min(MaxPush, maxStepBySpeed);
+                                push = math.min(push, effectiveMaxPush);
+                                pos += n * push;
+                            }
+                        }
+                    }
+                }
 
                 int2 nextCell = Map.WorldToGrid(pos);
                 if (Map.IsInMap(nextCell))
@@ -139,6 +140,17 @@ namespace Project.Horde
                 }
 
                 transform.Position = new float3(pos.x, pos.y, transform.Position.z);
+            }
+
+            private static int2 WorldToWallGrid(float2 world, ref WallFieldBlob wall)
+            {
+                float2 local = (world - wall.OriginWorld) / wall.CellSize;
+                return (int2)math.floor(local);
+            }
+
+            private static bool IsInWallBounds(int2 grid, ref WallFieldBlob wall)
+            {
+                return grid.x >= 0 && grid.y >= 0 && grid.x < wall.Width && grid.y < wall.Height;
             }
 
             private float2 ProjectToNearestWalkable(int2 blockedCell, float2 currentPos)

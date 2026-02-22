@@ -50,15 +50,22 @@ namespace Project.Map
 
             MapRuntimeData map = state.EntityManager.GetComponentData<MapRuntimeData>(mapEntity);
             DynamicBuffer<MapWalkableCell> walkable = state.EntityManager.GetBuffer<MapWalkableCell>(mapEntity);
-            int width = map.Width;
-            int height = map.Height;
-            int tileCount = width * height;
-            if (tileCount <= 0 || walkable.Length != tileCount)
+            int mapWidth = map.Width;
+            int mapHeight = map.Height;
+            int mapTileCount = mapWidth * mapHeight;
+            if (mapTileCount <= 0 || walkable.Length != mapTileCount)
             {
                 state.EntityManager.RemoveComponent<WallFieldDirtyTag>(mapEntity);
                 return;
             }
 
+            int margin = math.max(0, map.SpawnMargin);
+            int width = mapWidth + (margin * 2);
+            int height = mapHeight + (margin * 2);
+            int tileCount = width * height;
+            float2 originWorld = map.Origin - (new float2(margin, margin) * map.TileSize);
+
+            NativeArray<byte> expandedWalkable = new NativeArray<byte>(tileCount, Allocator.Temp);
             NativeArray<int> dist = new NativeArray<int>(tileCount, Allocator.Temp);
             NativeArray<int> queue = new NativeArray<int>(tileCount, Allocator.Temp);
             NativeArray<byte> dir = new NativeArray<byte>(tileCount, Allocator.Temp);
@@ -70,14 +77,28 @@ namespace Project.Map
 
                 int head = 0;
                 int tail = 0;
-                for (int i = 0; i < tileCount; i++)
+                for (int y = 0; y < height; y++)
                 {
-                    bool blocked = !walkable[i].IsWalkable;
-                    dist[i] = blocked ? 0 : InfDistance;
-                    dir[i] = NoneDirection;
-                    if (blocked)
+                    int row = y * width;
+                    int mapY = y - margin;
+                    for (int x = 0; x < width; x++)
                     {
-                        queue[tail++] = i;
+                        int mapX = x - margin;
+                        bool isWalkable = true;
+                        if (mapX >= 0 && mapY >= 0 && mapX < mapWidth && mapY < mapHeight)
+                        {
+                            isWalkable = walkable[mapX + (mapY * mapWidth)].IsWalkable;
+                        }
+
+                        int i = row + x;
+                        expandedWalkable[i] = isWalkable ? (byte)1 : (byte)0;
+                        bool blocked = !isWalkable;
+                        dist[i] = blocked ? 0 : InfDistance;
+                        dir[i] = NoneDirection;
+                        if (blocked)
+                        {
+                            queue[tail++] = i;
+                        }
                     }
                 }
 
@@ -100,7 +121,7 @@ namespace Project.Map
                     for (int x = 0; x < width; x++)
                     {
                         int index = row + x;
-                        if (!walkable[index].IsWalkable || dist[index] == InfDistance)
+                        if (expandedWalkable[index] == 0 || dist[index] == InfDistance)
                         {
                             dir[index] = NoneDirection;
                             continue;
@@ -129,7 +150,7 @@ namespace Project.Map
                 root.Width = width;
                 root.Height = height;
                 root.CellSize = map.TileSize;
-                root.OriginWorld = map.Origin;
+                root.OriginWorld = originWorld;
 
                 BlobBuilderArray<ushort> distBlob = builder.Allocate(ref root.Dist, tileCount);
                 BlobBuilderArray<byte> dirBlob = builder.Allocate(ref root.Dir, tileCount);
@@ -164,6 +185,7 @@ namespace Project.Map
             }
             finally
             {
+                if (expandedWalkable.IsCreated) expandedWalkable.Dispose();
                 if (dist.IsCreated) dist.Dispose();
                 if (queue.IsCreated) queue.Dispose();
                 if (dir.IsCreated) dir.Dispose();

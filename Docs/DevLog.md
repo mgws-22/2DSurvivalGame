@@ -1381,3 +1381,31 @@
    - `[HordeHardSeparation]`
 3. Verify zombies still move toward the center and continue separating/avoiding walls.
 4. Confirm no exceptions appear in Console.
+
+## 2026-02-22 - Boundary wall outer-face repulsion in spawn margin
+
+### What changed
+- Updated `Assets/_Project/Scripts/Map/WallFieldBuildSystem.cs`:
+  - wall field now builds on an expanded grid using `MapRuntimeData.SpawnMargin`.
+  - cells outside the playable map are treated as walkable/empty in the expanded wall-field grid.
+  - blocked map cells still seed the wall distance field, so boundary walls now generate distance/normal data on their outer faces too.
+  - `WallFieldBlob.OriginWorld` is shifted to the expanded grid origin.
+- Updated `Assets/_Project/Scripts/Horde/WallRepulsionSystem.cs`:
+  - wall repulsion samples `WallFieldBlob` using wall-field coordinates (`OriginWorld`, `CellSize`), so zombies in the out-of-map spawn margin can still get wall repulsion.
+  - zombies are still allowed to remain outside the map; only penetration into blocked wall/cliff tiles is prevented.
+  - existing in-map blocked-cell projection behavior remains unchanged.
+- Updated `Docs/Systems/Horde/WallRepulsion.md`.
+
+### Why
+- Zombies spawn outside the playable map by design and approach inward.
+- Previously, out-of-map zombies skipped wall repulsion because wall sampling was tied to in-map coordinates only, allowing boundary wall penetration from the outside.
+- Expanding the wall field into the spawn margin preserves outside movement while adding proper outer-face boundary behavior.
+
+### How to test
+1. Open `Assets/Scenes/SampleScene.unity` and enter Play Mode.
+2. Observe zombies moving in the out-of-map spawn margin near map boundary walls/cliffs.
+3. Verify they can exist outside the map, but do not enter/overlap boundary wall/cliff tiles from the outside.
+4. Verify internal wall repulsion/projection still behaves as before.
+5. Profiler watchlist:
+   - `GC Alloc = 0 B`
+   - no bounds exceptions / Burst safety issues
