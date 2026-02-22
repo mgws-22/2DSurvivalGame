@@ -3,6 +3,7 @@ using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Jobs;
+using Unity.Jobs.LowLevel.Unsafe;
 using Unity.Mathematics;
 using Unity.Transforms;
 
@@ -20,6 +21,8 @@ namespace Project.Horde
         private NativeList<float2> _positionsB;
         private NativeList<float> _moveSpeeds;
         private NativeParallelMultiHashMap<int, int> _cellToIndex;
+        private NativeArray<int> _congestionCapHitsPerThread;
+        private NativeArray<byte> _rebuildGridFlag;
         private ComponentLookup<LocalTransform> _localTransformLookup;
 
         public void OnCreate(ref SystemState state)
@@ -34,6 +37,8 @@ namespace Project.Horde
             _positionsB = new NativeList<float2>(1024, Allocator.Persistent);
             _moveSpeeds = new NativeList<float>(1024, Allocator.Persistent);
             _cellToIndex = new NativeParallelMultiHashMap<int, int>(4096, Allocator.Persistent);
+            _congestionCapHitsPerThread = new NativeArray<int>(math.max(1, JobsUtility.MaxJobThreadCount), Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _rebuildGridFlag = new NativeArray<byte>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _localTransformLookup = state.GetComponentLookup<LocalTransform>(false);
 
             state.RequireForUpdate(_zombieQuery);
@@ -45,24 +50,15 @@ namespace Project.Horde
                 Entity configEntity = state.EntityManager.CreateEntity(typeof(HordeSeparationConfig));
                 state.EntityManager.SetComponentData(configEntity, new HordeSeparationConfig
                 {
-                    // Viktigt: detta måste matcha din sprite/world scale (halva diametern)
                     Radius = 0.20f,
-
                     CellSizeFactor = 1.25f,
-                    InfluenceRadiusFactor = 2.00f, // tuning: widen local neighbor awareness to reduce high overlap
-
-                    // SeparationStrength: håll modest för att undvika jitter,
-                    // låt iterations + caps göra jobbet.
+                    InfluenceRadiusFactor = 2.00f,
                     SeparationStrength = 1.00f,
-
-                    // Se till att separation inte är "för snål" i trängsel.
-                    // Om du har global speed clamp (moveSpeed*dt) kan du sätta den högre.
-                    MaxPushPerFrame = 2.2f, // tuning: Rule1 run-2, raise soft authority for persistent high overlap
-
+                    MaxPushPerFrame = 2.2f,
                     MaxNeighbors = 32,
-
-                    // Punktmål + trängsel => 2 iterationer är ofta nyckeln
-                    Iterations = 3
+                    Iterations = 3,
+                    RebuildGridWhenCongested = 0,
+                    CongestionCapHitFractionThreshold = 0.10f
                 });
             }
         }
@@ -93,6 +89,16 @@ namespace Project.Horde
             {
                 _cellToIndex.Dispose();
             }
+
+            if (_congestionCapHitsPerThread.IsCreated)
+            {
+                _congestionCapHitsPerThread.Dispose();
+            }
+
+            if (_rebuildGridFlag.IsCreated)
+            {
+                _rebuildGridFlag.Dispose();
+            }
         }
 
         public void OnUpdate(ref SystemState state)
@@ -103,7 +109,6 @@ namespace Project.Horde
             {
                 return;
             }
-
 
             int count = _zombieQuery.CalculateEntityCount();
             if (count <= 1)
@@ -122,6 +127,8 @@ namespace Project.Horde
             float maxPushThisFrame = math.max(0f, config.MaxPushPerFrame) * deltaTime;
             int maxNeighbors = math.clamp(config.MaxNeighbors, 4, 64);
             int iterations = math.clamp(config.Iterations, 1, 8);
+            byte rebuildGridWhenCongested = config.RebuildGridWhenCongested != 0 ? (byte)1 : (byte)0;
+            float congestionCapHitFractionThreshold = math.clamp(config.CongestionCapHitFractionThreshold, 0f, 1f);
 
             _localTransformLookup.Update(ref state);
 
@@ -148,22 +155,33 @@ namespace Project.Horde
             NativeArray<float2> sourcePositions = _positionsA.AsArray();
             NativeArray<float2> targetPositions = _positionsB.AsArray();
 
+            ClearSpatialGridJob clearGridJob = new ClearSpatialGridJob
+            {
+                Grid = _cellToIndex
+            };
+            state.Dependency = clearGridJob.Schedule(state.Dependency);
+
+            BuildSpatialGridJob buildGridJob = new BuildSpatialGridJob
+            {
+                Positions = sourcePositions,
+                Grid = _cellToIndex.AsParallelWriter(),
+                InvCellSize = invCellSize
+            };
+            state.Dependency = buildGridJob.Schedule(count, 128, state.Dependency);
+
+            bool trackCongestionFallback = rebuildGridWhenCongested != 0 && iterations > 1;
+            if (trackCongestionFallback)
+            {
+                ClearCongestionTrackingJob clearCongestionJob = new ClearCongestionTrackingJob
+                {
+                    CapHitsPerThread = _congestionCapHitsPerThread,
+                    RebuildFlag = _rebuildGridFlag
+                };
+                state.Dependency = clearCongestionJob.Schedule(state.Dependency);
+            }
+
             for (int iteration = 0; iteration < iterations; iteration++)
             {
-                ClearSpatialGridJob clearGridJob = new ClearSpatialGridJob
-                {
-                    Grid = _cellToIndex
-                };
-                state.Dependency = clearGridJob.Schedule(state.Dependency);
-
-                BuildSpatialGridJob buildGridJob = new BuildSpatialGridJob
-                {
-                    Positions = sourcePositions,
-                    Grid = _cellToIndex.AsParallelWriter(),
-                    InvCellSize = invCellSize
-                };
-                state.Dependency = buildGridJob.Schedule(count, 128, state.Dependency);
-
                 SeparateJob separateJob = new SeparateJob
                 {
                     Positions = sourcePositions,
@@ -179,13 +197,44 @@ namespace Project.Horde
                     MoveSpeeds = _moveSpeeds.AsArray(),
                     DeltaTime = deltaTime,
                     Iterations = iterations,
-                    CurrentIteration = iteration
+                    CurrentIteration = iteration,
+                    TrackCongestionCapHits = (byte)((trackCongestionFallback && iteration == 0) ? 1 : 0),
+                    CongestionCapHitsPerThread = _congestionCapHitsPerThread
                 };
                 state.Dependency = separateJob.Schedule(count, 128, state.Dependency);
 
                 NativeArray<float2> swap = sourcePositions;
                 sourcePositions = targetPositions;
                 targetPositions = swap;
+
+                if (trackCongestionFallback && iteration == 0)
+                {
+                    DecideGridRebuildFromCongestionJob decideGridRebuildJob = new DecideGridRebuildFromCongestionJob
+                    {
+                        CapHitsPerThread = _congestionCapHitsPerThread,
+                        RebuildFlag = _rebuildGridFlag,
+                        Enabled = rebuildGridWhenCongested,
+                        UnitCount = count,
+                        CapHitFractionThreshold = congestionCapHitFractionThreshold
+                    };
+                    state.Dependency = decideGridRebuildJob.Schedule(state.Dependency);
+
+                    ConditionalClearSpatialGridJob conditionalClearGridJob = new ConditionalClearSpatialGridJob
+                    {
+                        Grid = _cellToIndex,
+                        RebuildFlag = _rebuildGridFlag
+                    };
+                    state.Dependency = conditionalClearGridJob.Schedule(state.Dependency);
+
+                    ConditionalBuildSpatialGridJob conditionalBuildGridJob = new ConditionalBuildSpatialGridJob
+                    {
+                        Positions = sourcePositions,
+                        Grid = _cellToIndex.AsParallelWriter(),
+                        InvCellSize = invCellSize,
+                        RebuildFlag = _rebuildGridFlag
+                    };
+                    state.Dependency = conditionalBuildGridJob.Schedule(count, 128, state.Dependency);
+                }
             }
 
             ApplyPositionsJob applyJob = new ApplyPositionsJob
@@ -261,6 +310,88 @@ namespace Project.Horde
         }
 
         [BurstCompile]
+        private struct ConditionalClearSpatialGridJob : IJob
+        {
+            public NativeParallelMultiHashMap<int, int> Grid;
+            [ReadOnly] public NativeArray<byte> RebuildFlag;
+
+            public void Execute()
+            {
+                if (RebuildFlag[0] == 0)
+                {
+                    return;
+                }
+
+                Grid.Clear();
+            }
+        }
+
+        [BurstCompile]
+        private struct ConditionalBuildSpatialGridJob : IJobParallelFor
+        {
+            [ReadOnly] public NativeArray<float2> Positions;
+            public NativeParallelMultiHashMap<int, int>.ParallelWriter Grid;
+            public float InvCellSize;
+            [ReadOnly] public NativeArray<byte> RebuildFlag;
+
+            public void Execute(int index)
+            {
+                if (RebuildFlag[0] == 0)
+                {
+                    return;
+                }
+
+                int2 cell = (int2)math.floor(Positions[index] * InvCellSize);
+                Grid.Add(HashCell(cell.x, cell.y), index);
+            }
+        }
+
+        [BurstCompile]
+        private struct ClearCongestionTrackingJob : IJob
+        {
+            public NativeArray<int> CapHitsPerThread;
+            public NativeArray<byte> RebuildFlag;
+
+            public void Execute()
+            {
+                for (int i = 0; i < CapHitsPerThread.Length; i++)
+                {
+                    CapHitsPerThread[i] = 0;
+                }
+
+                RebuildFlag[0] = 0;
+            }
+        }
+
+        [BurstCompile]
+        private struct DecideGridRebuildFromCongestionJob : IJob
+        {
+            [ReadOnly] public NativeArray<int> CapHitsPerThread;
+            public NativeArray<byte> RebuildFlag;
+            public byte Enabled;
+            public int UnitCount;
+            public float CapHitFractionThreshold;
+
+            public void Execute()
+            {
+                if (Enabled == 0 || UnitCount <= 0)
+                {
+                    RebuildFlag[0] = 0;
+                    return;
+                }
+
+                int capHits = 0;
+                for (int i = 0; i < CapHitsPerThread.Length; i++)
+                {
+                    capHits += CapHitsPerThread[i];
+                }
+
+                float fraction = (float)capHits / math.max(1, UnitCount);
+                RebuildFlag[0] = fraction >= CapHitFractionThreshold ? (byte)1 : (byte)0;
+            }
+        }
+
+        [BurstCompile]
         private struct SeparateJob : IJobParallelFor
         {
             private const float ZeroDistanceSq = 1e-12f;
@@ -280,6 +411,9 @@ namespace Project.Horde
             public float DeltaTime;
             public int Iterations;
             public int CurrentIteration;
+            public byte TrackCongestionCapHits;
+            [NativeDisableParallelForRestriction] public NativeArray<int> CongestionCapHitsPerThread;
+            [NativeSetThreadIndex] public int ThreadIndex;
 
             public void Execute(int index)
             {
@@ -369,6 +503,12 @@ namespace Project.Horde
                     }
 
                     pos += softDelta;
+                }
+
+                if (TrackCongestionCapHits != 0 && reachedCap)
+                {
+                    int workerIndex = math.clamp(ThreadIndex - 1, 0, CongestionCapHitsPerThread.Length - 1);
+                    CongestionCapHitsPerThread[workerIndex] = CongestionCapHitsPerThread[workerIndex] + 1;
                 }
 
                 CorrectedPositions[index] = pos;

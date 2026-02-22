@@ -1426,3 +1426,25 @@
 2. Let zombies approach boundary cliffs/walls from the spawn margin.
 3. Verify zombies remain allowed outside the map, and if they touch a boundary blocked tile they are corrected back to the outside side (not teleported through to the inside).
 4. Verify internal wall behavior remains unchanged and `GC Alloc` stays `0 B`.
+
+## 2026-02-22 - Soft separation grid-once hot path optimization
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordeSeparationSystem.cs` to build the soft-separation spatial hash grid once per frame instead of rebuilding it every solver iteration.
+- Kept the existing Jacobi-style separation iterations and per-iteration caps/clamps unchanged; iterations now reuse a stale-within-frame grid for better performance.
+- Added optional congestion fallback (default OFF):
+  - `HordeSeparationConfig.RebuildGridWhenCongested`
+  - `HordeSeparationConfig.CongestionCapHitFractionThreshold`
+  - If enabled, the system counts (cheaply, per-thread) how many entities hit the `MaxNeighbors` cap in iteration 0 and performs one extra grid rebuild only when the cap-hit fraction exceeds the threshold.
+- Updated `Assets/_Project/Scripts/Horde/ZombieComponents.cs` with the new optional config fields.
+- Updated `Docs/Systems/Horde/HordeSeparation.md`.
+
+### Why
+- Rebuilding the spatial hash grid inside every separation iteration multiplies full-pass cost by `Iterations`, which becomes a major CPU bottleneck at high unit counts (e.g. 35k+).
+- Reusing the grid across iterations cuts repeated broadphase cost while keeping separation behavior close to the previous implementation.
+
+### How to test
+1. Open `Assets/Scenes/SampleScene.unity` and run a high unit count scenario (e.g. 20k-35k+).
+2. In Profiler, compare `HordeSeparationSystem` CPU time before/after with `Iterations > 1`.
+3. Verify zombie separation still works (minor differences acceptable due stale grid within frame).
+4. Confirm `GC Alloc = 0 B` and no job safety exceptions.

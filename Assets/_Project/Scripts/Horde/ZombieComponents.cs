@@ -53,6 +53,8 @@ namespace Project.Horde
         public float MaxPushPerFrame;
         public int MaxNeighbors;
         public int Iterations;
+        public byte RebuildGridWhenCongested;
+        public float CongestionCapHitFractionThreshold;
     }
 
     public struct WallRepulsionConfig : IComponentData
