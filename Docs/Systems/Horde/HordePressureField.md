@@ -40,7 +40,7 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
 - One-frame pressure config budget is `MaxPushPerFrame * dt`.
 - One-frame pressure speed budget is `moveSpeed * dt * SpeedFractionCap`.
 - Effective pressure cap per unit is `min(configBudget, speedBudget)`.
-- Backpressure tuning fields (consumed by `HordeBackpressureSystem` and metrics):
+- Backpressure tuning fields (consumed by `HordeBackpressureSystem`):
   - `BackpressureThreshold` (default `7.0`)
   - `BackpressureK` (default `0.20`)
   - `MinSpeedFactor` (default `0.30`)

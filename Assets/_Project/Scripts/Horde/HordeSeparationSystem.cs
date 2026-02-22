@@ -14,8 +14,6 @@ namespace Project.Horde
     [UpdateBefore(typeof(HordeHardSeparationSystem))]
     public partial struct HordeSeparationSystem : ISystem
     {
-        private static bool s_loggedRuntimeDiagnostics;
-        private static bool s_loggedTuningUse;
         private EntityQuery _zombieQuery;
         private NativeList<Entity> _entities;
         private NativeList<float2> _positionsA;
@@ -106,38 +104,6 @@ namespace Project.Horde
                 return;
             }
 
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (!s_loggedRuntimeDiagnostics)
-            {
-                bool hasPressureConfig = SystemAPI.TryGetSingleton(out HordePressureConfig pressureConfig);
-                bool hasHardConfig = SystemAPI.TryGetSingleton(out HordeHardSeparationConfig hardConfig);
-                bool hasWallConfig = SystemAPI.TryGetSingleton(out WallRepulsionConfig wallConfig);
-                float referenceMoveSpeed = 1f;
-                float maxStep = referenceMoveSpeed * deltaTime;
-                float pressureMaxPushPerFrame = hasPressureConfig ? math.max(0f, pressureConfig.MaxPushPerFrame) : 0f;
-                float pressureSpeedFractionCap = hasPressureConfig ? math.clamp(pressureConfig.SpeedFractionCap, 0f, 1f) : 0f;
-                float pressureMaxFromConfig = pressureMaxPushPerFrame * deltaTime;
-                float pressureMaxFromSpeed = maxStep * pressureSpeedFractionCap;
-                float pressureMaxThisFrame = hasPressureConfig ? math.min(pressureMaxFromConfig, pressureMaxFromSpeed) : 0f;
-                float separationMaxThisFrame = math.max(0f, config.MaxPushPerFrame) * deltaTime;
-                float wallMaxThisFrame = hasWallConfig ? math.max(0f, wallConfig.MaxWallPushPerFrame) * deltaTime : 0f;
-                string order = "ZombieSteeringSystem -> HordePressureFieldSystem -> HordeSeparationSystem -> HordeHardSeparationSystem -> WallRepulsionSystem";
-                UnityEngine.Debug.Log(
-                    $"[HordeRuntimeDiag] PressureEnabled={(hasPressureConfig ? pressureConfig.Enabled : (byte)0)} " +
-                    $"DisablePairwiseWhenPressure={(hasPressureConfig ? pressureConfig.DisablePairwiseSeparationWhenPressureEnabled : (byte)0)} " +
-                    $"PressureMaxPushPerFrame={pressureMaxPushPerFrame:F3} PressureSpeedFractionCap={pressureSpeedFractionCap:F2} " +
-                    $"SoftEnabled=1 SoftMaxNeighbors={config.MaxNeighbors} SoftIterations={config.Iterations} SoftMaxPushPerFrame={config.MaxPushPerFrame:F3} " +
-                    $"HardEnabled={(hasHardConfig ? hardConfig.Enabled : (byte)0)} HardJamOnly={(hasHardConfig ? hardConfig.JamOnly : (byte)0)} " +
-                    $"HardRadius={(hasHardConfig ? hardConfig.Radius : 0f):F3} HardJamPressureThreshold={(hasHardConfig ? hardConfig.JamPressureThreshold : 0f):F3} " +
-                    $"HardDensePressureThreshold={(hasHardConfig ? hardConfig.DensePressureThreshold : 0f):F3} HardSlowSpeedFraction={(hasHardConfig ? hardConfig.SlowSpeedFraction : 0f):F2} " +
-                    $"HardMaxNeighbors={(hasHardConfig ? hardConfig.MaxNeighbors : 0)} HardIterations={(hasHardConfig ? hardConfig.Iterations : 0)} " +
-                    $"dt={deltaTime:F4} RefMoveSpeed={referenceMoveSpeed:F2} RefMaxStep={maxStep:F4} " +
-                    $"PressureConfigBudgetThisFrame={pressureMaxFromConfig:F4} PressureSpeedBudgetThisFrame={pressureMaxFromSpeed:F4} PressureEffectiveCapThisFrame={pressureMaxThisFrame:F4} " +
-                    $"SeparationMaxThisFrame={separationMaxThisFrame:F4} WallMaxThisFrame={wallMaxThisFrame:F4} " +
-                    $"Order={order}");
-                s_loggedRuntimeDiagnostics = true;
-            }
-#endif
 
             int count = _zombieQuery.CalculateEntityCount();
             if (count <= 1)
@@ -157,27 +123,6 @@ namespace Project.Horde
             int maxNeighbors = math.clamp(config.MaxNeighbors, 4, 64);
             int iterations = math.clamp(config.Iterations, 1, 8);
 
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (!s_loggedTuningUse)
-            {
-                bool oldStrengthClampWouldApply = config.SeparationStrength < 0f || config.SeparationStrength > 1f;
-                bool oldIterationClampWouldApply = config.Iterations < 1 || config.Iterations > 2;
-                string used = "[HordeSeparation] Using separationStrength=" + separationStrength.ToString("F3") +
-                    " iterations=" + iterations + ".";
-                if (oldStrengthClampWouldApply || oldIterationClampWouldApply)
-                {
-                    UnityEngine.Debug.Log(
-                        used + " Old clamps would have applied (strength0to1=" + oldStrengthClampWouldApply +
-                        ", iterations1to2=" + oldIterationClampWouldApply + ").");
-                }
-                else
-                {
-                    UnityEngine.Debug.Log(used);
-                }
-
-                s_loggedTuningUse = true;
-            }
-#endif
             _localTransformLookup.Update(ref state);
 
             EnsureCapacity(count);

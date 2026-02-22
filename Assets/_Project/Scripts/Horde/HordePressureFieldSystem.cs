@@ -14,7 +14,6 @@ namespace Project.Horde
     [UpdateAfter(typeof(ZombieSteeringSystem))]
     [UpdateBefore(typeof(HordeSeparationSystem))]
     [UpdateBefore(typeof(HordeHardSeparationSystem))]
-    [UpdateBefore(typeof(HordeTuningQuickMetricsSystem))]
     public partial struct HordePressureFieldSystem : ISystem
     {
         private const float Epsilon = 1e-6f;

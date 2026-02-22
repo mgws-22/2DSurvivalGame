@@ -126,6 +126,7 @@ namespace Project.Horde
                     }
                 }
 
+
                 int2 nextCell = Map.WorldToGrid(pos);
                 if (Map.IsInMap(nextCell))
                 {

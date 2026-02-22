@@ -115,45 +115,4 @@ namespace Project.Horde
         public float Value;
     }
 
-    public struct HordeTuningQuickConfig : IComponentData
-    {
-        public int Enabled;
-        public int LogEveryNFrames;
-        public int SampleStride;
-    }
-
-    public struct HordeTuningQuickMetrics : IComponentData
-    {
-        public int Sampled;
-        public int OverlapHits;
-        public int ExactOverlapHits;
-        public int JamHits;
-        public int HardJamEnabledHits;
-        public int CapReachedHits;
-        public int ProcessedNeighborsSum;
-        public int SpeedSamples;
-        public int BackpressureActiveHits;
-        public int AccelSamples;
-        public int HardAppliedSamples;
-        public int HardAppliedHits;
-        public float Dt;
-        public float AvgSpeed;
-        public float P50Speed;
-        public float P90Speed;
-        public float MinSpeed;
-        public float MaxSpeed;
-        public float AvgAccel;
-        public float AvgSpeedFraction;
-        public float AvgSpeedScale;
-        public float MinSpeedScale;
-        public float HardAppliedDeltaSum;
-    }
-
-    public struct HordeHardSeparationDebugStats : IComponentData
-    {
-        public int Sampled;
-        public int Applied;
-        public float SumDelta;
-        public float LastDt;
-    }
 }

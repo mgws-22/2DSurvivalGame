@@ -1347,3 +1347,37 @@
 5. Profiler watchlist:
    - `GC Alloc = 0 B`
    - no new main-thread sync spikes
+
+## 2026-02-22 - Remove Horde tuning runtime diagnostics and debug sampling
+
+### What changed
+- Removed horde tuning/runtime diagnostic logs from gameplay systems:
+  - `[HordeRuntimeDiag]` and `[HordeSeparation]` logs from `Assets/_Project/Scripts/Horde/HordeSeparationSystem.cs`
+  - `[HordeHardSeparation]` logs and hard-system startup log from `Assets/_Project/Scripts/Horde/HordeHardSeparationSystem.cs`
+- Deleted diagnostics-only quick metrics pipeline:
+  - `Assets/_Project/Scripts/Horde/HordeTuningQuickMetricsSystem.cs`
+  - `Assets/_Project/Scripts/Horde/HordeTuningQuickMetricsSystem.cs.meta`
+- Removed diagnostics-only ECS components from `Assets/_Project/Scripts/Horde/ZombieComponents.cs`:
+  - `HordeTuningQuickConfig`
+  - `HordeTuningQuickMetrics`
+  - `HordeHardSeparationDebugStats`
+- Removed hard-separation debug sampling/reduce jobs and per-thread buffers that existed only to feed diagnostics logs.
+- Removed pressure-system ordering attribute targeting the deleted quick-metrics system.
+- Updated docs and architecture index:
+  - removed `Docs/Systems/Horde/HordeTuningQuickMetrics.md`
+  - removed its link from `Docs/Architecture/Index.md`
+  - updated `Docs/Systems/Horde/HordeSeparation.md`, `Docs/Systems/Horde/HordeHardSeparation.md`, `Docs/Systems/Horde/HordePressureField.md`
+
+### Why
+- The tuning logs and sampled metrics were temporary diagnostics and should not run in normal gameplay.
+- Removing diagnostics-only sampling/components eliminates unnecessary runtime overhead and avoids debug-data dependency issues.
+
+### How to test
+1. Open `Assets/Scenes/SampleScene.unity` and enter Play Mode for ~10 seconds.
+2. Confirm Console does not contain any of:
+   - `[HordeRuntimeDiag]`
+   - `[HordeTune]`
+   - `[HordeSeparation]`
+   - `[HordeHardSeparation]`
+3. Verify zombies still move toward the center and continue separating/avoiding walls.
+4. Confirm no exceptions appear in Console.

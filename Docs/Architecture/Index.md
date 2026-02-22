@@ -8,7 +8,6 @@
 - [HordeSeparationSystem](../Systems/Horde/HordeSeparation.md)
 - [HordeHardSeparationSystem](../Systems/Horde/HordeHardSeparation.md)
 - [WallRepulsionSystem](../Systems/Horde/WallRepulsion.md)
-- [HordeTuningQuickMetricsSystem](../Systems/Horde/HordeTuningQuickMetrics.md)
 - [Flow Field Pathfinding (Plan A)](../Systems/Horde/FlowFieldPathfinding.md)
 - [CameraWasdZoomController](../Systems/Camera/CameraWasdZoomController.md)
 

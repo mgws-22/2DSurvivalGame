@@ -11,7 +11,6 @@ Default behavior is jam-gated by default:
 ## Data
 - `ZombieTag`, `LocalTransform` (`Assets/_Project/Scripts/Horde/ZombieComponents.cs`)
 - `HordeHardSeparationConfig` (`Assets/_Project/Scripts/Horde/ZombieComponents.cs`)
-- `HordeHardSeparationDebugStats` (`Assets/_Project/Scripts/Horde/ZombieComponents.cs`)
 - `HordeHardSeparationConfigAuthoring` (`Assets/_Project/Scripts/Horde/HordeHardSeparationConfigAuthoring.cs`)
 - Runtime system:
   - `Assets/_Project/Scripts/Horde/HordeHardSeparationSystem.cs`
@@ -36,9 +35,6 @@ Per frame when enabled:
 11. Swap buffers and repeat for configured iterations (`Iterations` or `IterationsJam`).
 12. Write final positions back to `LocalTransform`.
 13. Store sampled positions for next-frame slow-speed jam check.
-14. Sample final hard-solver delta (`_deltas`, every 32nd unit) into `HordeHardSeparationDebugStats`:
-   - `Sampled`, `Applied`, `SumDelta`, `LastDt`
-
 ## Invariants
 - No Unity Physics/collider dependency.
 - Compute pass is race-free: each worker writes only `delta[i]`.
@@ -47,7 +43,6 @@ Per frame when enabled:
 - Grid capacity is pre-sized from entity count with slack before build to avoid runtime overflow.
 - If `JamOnly = 1`, non-jam units always write zero hard-separation delta.
 - `DensePressureThreshold <= 0` preserves previous gating semantics by falling back to `JamPressureThreshold`.
-- Hard debug stats are sampling-based (no per-entity atomics in hot solver loop).
 - Update order: after `ZombieSteeringSystem` + `HordePressureFieldSystem` + `HordeSeparationSystem`, before `WallRepulsionSystem`.
 
 ## Performance
@@ -55,15 +50,13 @@ Per frame when enabled:
 - Spatial hash keeps neighbor checks local.
 - Complexity: `O(N * MaxNeighbors * Iterations)`.
 - Uses persistent native containers to avoid GC pressure.
-- Hard debug instrumentation uses persistent per-thread accumulators and a sampled reduce job (default stride `32`).
 
 ## Verification
 1. Add `HordeHardSeparationConfigAuthoring` to a scene object.
 2. Keep defaults (`Enabled=1`, `JamOnly=1`) and verify open-flow windows stay close to previous behavior.
 3. In jam windows, verify overlap drops faster than with soft-only separation.
 4. Optionally set `Enabled=0` to compare against baseline behavior.
-5. Watch `[HordeTune]` for `hardApplied=...%` and `avgHardDelta=...` while toggling `JamOnly` and tuning `DensePressureThreshold`.
-6. Profile:
+5. Profile:
    - `GC Alloc` remains `0 B` in gameplay.
    - no job safety/race exceptions.
    - no unexpected main-thread spikes from the solver.

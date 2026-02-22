@@ -41,6 +41,7 @@ Optional multi-pass is supported via `Iterations` (clamped to `1..8`).
 - No per-frame managed allocations.
 - No `O(N^2)` all-pairs scan.
 - Soft displacement from separation is tied to each zombie's `ZombieMoveSpeed`.
+- No runtime tuning/diagnostic log output from this system in gameplay.
 - Update order: after `ZombieSteeringSystem` + `HordePressureFieldSystem`, before `HordeHardSeparationSystem`.
 
 ## Performance
