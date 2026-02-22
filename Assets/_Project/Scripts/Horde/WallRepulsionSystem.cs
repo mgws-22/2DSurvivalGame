@@ -172,13 +172,7 @@ namespace Project.Horde
                         for (int x = minX; x <= maxX; x++)
                         {
                             int2 c = new int2(x, y);
-                            if (!Map.IsInMap(c))
-                            {
-                                continue;
-                            }
-
-                            int idx = Map.ToIndex(c);
-                            if (!Walkable[idx].IsWalkable)
+                            if (!IsProjectionCandidateWalkableOrEmpty(c))
                             {
                                 continue;
                             }
@@ -201,6 +195,20 @@ namespace Project.Horde
                 }
 
                 return best;
+            }
+
+            private bool IsProjectionCandidateWalkableOrEmpty(int2 cell)
+            {
+                if (!Map.IsInMap(cell))
+                {
+                    // Treat out-of-map cells as empty for boundary-wall projection so
+                    // units entering a boundary wall from the outside are corrected back
+                    // to the outside instead of being forced through the wall.
+                    return true;
+                }
+
+                int idx = Map.ToIndex(cell);
+                return idx >= 0 && idx < Walkable.Length && Walkable[idx].IsWalkable;
             }
 
             private float2 ClosestPointInsideCell(int2 cell, float2 worldPos)

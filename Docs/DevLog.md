@@ -1409,3 +1409,20 @@
 5. Profiler watchlist:
    - `GC Alloc = 0 B`
    - no bounds exceptions / Burst safety issues
+
+## 2026-02-22 - Boundary wall projection preserves outside side
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/WallRepulsionSystem.cs` blocked-cell fallback projection:
+  - out-of-map cells are now treated as empty projection candidates during nearest-walkable projection.
+  - this prevents zombies that enter a boundary wall/cliff tile from the spawn-margin side from being projected through the wall to an in-map walkable tile.
+
+### Why
+- The expanded wall field and outside sampling fixed repulsion coverage, but boundary blocked-cell safety projection still only searched in-map walkable cells.
+- For a blocked boundary tile, that could force a unit to the inside of the map, effectively tunneling through the wall from the outside.
+
+### How to test
+1. Open `Assets/Scenes/SampleScene.unity` and enter Play Mode.
+2. Let zombies approach boundary cliffs/walls from the spawn margin.
+3. Verify zombies remain allowed outside the map, and if they touch a boundary blocked tile they are corrected back to the outside side (not teleported through to the inside).
+4. Verify internal wall behavior remains unchanged and `GC Alloc` stays `0 B`.
