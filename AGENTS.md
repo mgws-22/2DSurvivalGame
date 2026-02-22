@@ -1,4 +1,4 @@
-# AGENTS.md — Codex rules for this Unity project
+# AGENTS.md - Codex rules for this Unity project
 
 ## 0) Prime directive
 Performance is a hard requirement. Assume this project must scale to large entity counts.
@@ -14,6 +14,15 @@ Codex must:
   - Version Control: **Visible Meta Files**
   - Asset Serialization: **Force Text**
 - Never commit generated folders: `Library/`, `Temp/`, `Obj/`, `Logs/`, `Build/`, `Builds/`.
+
+### File encoding & line endings (mandatory)
+- Do NOT change file encoding, BOM, or line endings unless explicitly requested.
+- Preserve the existing encoding of each file; avoid repo-wide normalization.
+- If `apply_patch` fails due to encoding, use a controlled scripted edit that:
+  - reads and writes with the same encoding
+  - preserves CRLF vs LF
+  - minimizes diffs (only the intended change)
+- Prefer ASCII-only edits to avoid encoding surprises.
 
 ## 2) Change policy (how Codex should work)
 Before implementing:
@@ -88,7 +97,7 @@ When placeholder visuals are needed (sprites, icons, simple VFX):
 
 ## 5) Data layout + algorithms (performance heuristics)
 - Prefer SoA-like component layouts and contiguous data access.
-- Use spatial partitioning (grid / hashing) for neighbor queries; avoid O(n²).
+- Use spatial partitioning (grid / hashing) for neighbor queries; avoid O(n^2).
 - Avoid frequent random memory access; batch and reuse buffers.
 - Prefer integer math / fixed-point where appropriate; avoid heavy trig in tight loops.
 
@@ -97,6 +106,14 @@ When placeholder visuals are needed (sprites, icons, simple VFX):
   - Use `ProfilerMarker` / scoped markers (not strings per frame).
 - Add counters only when requested or when debugging a performance regression.
 - Never spam logs during gameplay.
+
+### Language & text rules (mandatory)
+- All source code comments must be written in English only.
+- All log strings (`Debug.Log`, exceptions, assertions, diagnostics) must be English only.
+- All documentation files under `Docs/` must be English only.
+- ASCII-only in codebase text: do not introduce non-ASCII characters (for example Swedish letters `\\u00E5`, `\\u00E4`, `\\u00F6`, smart quotes, or symbol glyphs) in code/comments/logs/docs.
+- Codex responses should be in English by default for this repo's work items unless the user explicitly requests Swedish for the explanation (code/comments/logs/docs must still remain English and ASCII-only).
+- If a Swedish string is required for player-facing UI, that must be explicitly requested; otherwise keep UI text English.
 
 ## 7) Safety and determinism
 - Jobs must respect safety:
@@ -127,7 +144,7 @@ For each task, Codex must output:
 
 ## 10) Planning rule (for large work)
 If requested work is broad (new subsystem, major refactor, pathfinding, large spawning/steering changes):
-- First create/update an ExecPlan in `Plans/<Topic>_ExecPlan.md` (unless user explicitly says “no plan”).
+- First create/update an ExecPlan in `Plans/<Topic>_ExecPlan.md` (unless user explicitly says "no plan").
 - Keep the plan short: goals, non-goals, steps, perf risks, verification.
 
 ## Documentation is a deliverable (mandatory)

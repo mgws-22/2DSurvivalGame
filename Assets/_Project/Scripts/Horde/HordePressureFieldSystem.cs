@@ -46,17 +46,17 @@ namespace Project.Horde
                 {
                     Enabled = 1,
 
-                    // Pressure aktiveras tidigt nog för att motverka jam vid punktmål
+                    // Pressure activates early enough to reduce jams near point targets
                     TargetUnitsPerCell = 1.8f,
 
-                    // Mycket lägre än 10: pressure ska inte kännas som en separat motor
+                    // Much lower than 10: pressure should not feel like a separate motor
                     PressureStrength = 1f,
 
-                    // Sätt högt så att SpeedFractionCap blir den verkliga begränsningen
-                    // (då blir beteendet mer förutsägbart)
+                    // Set high so SpeedFractionCap becomes the real limiter
+                    // (behavior becomes more predictable)
                     MaxPushPerFrame = 4.0f,
 
-                    // Pressure får bara använda en del av moveSpeed*dt-budgeten
+                    // Pressure may use only part of the moveSpeed*dt budget
                     SpeedFractionCap = 0.15f,
 
                     // Tuning rule: keep free-flow speed at 1.0 until pressure exceeds threshold.
@@ -65,13 +65,13 @@ namespace Project.Horde
                     BackpressureK = 0.2f,
                     BackpressureMaxFactor = 22.0f,
 
-                    // Lägre för att undvika "väggmagnetism"
+                    // Lower to avoid wall magnetism
                     BlockedCellPenalty = 3.0f,
 
                     FieldUpdateIntervalFrames = 1,
                     BlurPasses = 1,
 
-                    // Augment mode: körs tillsammans med separation
+                    // Augment mode: runs together with separation
                     DisablePairwiseSeparationWhenPressureEnabled = 0
                 });
             }

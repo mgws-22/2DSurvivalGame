@@ -744,7 +744,7 @@
 2. Verify:
    - `PressureConfigBudgetThisFrame` and `PressureSpeedBudgetThisFrame` are printed.
    - `PressureEffectiveCapThisFrame` equals their `min(...)`.
-   - with `dt≈0.022`, `RefMoveSpeed=1`, `SpeedFractionCap=0.25`, effective cap is near `0.0055` when config budget is larger.
+   - with `dt~0.022`, `RefMoveSpeed=1`, `SpeedFractionCap=0.25`, effective cap is near `0.0055` when config budget is larger.
 3. Stress with 5k+ to 20k+ entities and confirm pressure density behavior is stable (no obvious random undercount artifacts).
 4. Profile and confirm `GC Alloc` remains `0 B`.
 
