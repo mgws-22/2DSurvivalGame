@@ -470,16 +470,18 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Project.Horde.HordeHardSeparationConfigAuthoring
   _enabled: 1
   _jamOnly: 1
-  _jamPressureThreshold: 0
-  _iterationsJam: 2
-  _maxNeighborsJam: 1
-  _maxPushPerFrameJam: 33
-  _radius: 0.2
-  _cellSize: 1
-  _maxNeighbors: 1
+  _jamPressureThreshold: 99
+  _densePressureThreshold: 99
+  _slowSpeedFraction: 0.198
+  _iterationsJam: 3
+  _maxNeighborsJam: 32
+  _maxPushPerFrameJam: 1
+  _radius: 0.4
+  _cellSize: 0.1
+  _maxNeighbors: 28
   _iterations: 2
-  _maxCorrectionPerIter: 33222
-  _slop: 1
+  _maxCorrectionPerIter: 2
+  _slop: 0.001
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

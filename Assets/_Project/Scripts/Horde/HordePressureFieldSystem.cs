@@ -51,14 +51,14 @@ namespace Project.Horde
                     TargetUnitsPerCell = 1.8f,
 
                     // Mycket lägre än 10: pressure ska inte kännas som en separat motor
-                    PressureStrength = 5f,
+                    PressureStrength = 1f,
 
                     // Sätt högt så att SpeedFractionCap blir den verkliga begränsningen
                     // (då blir beteendet mer förutsägbart)
-                    MaxPushPerFrame = 10.0f,
+                    MaxPushPerFrame = 4.0f,
 
                     // Pressure får bara använda en del av moveSpeed*dt-budgeten
-                    SpeedFractionCap = 0.35f,
+                    SpeedFractionCap = 0.15f,
 
                     // Tuning rule: keep free-flow speed at 1.0 until pressure exceeds threshold.
                     BackpressureThreshold = 6.5f,

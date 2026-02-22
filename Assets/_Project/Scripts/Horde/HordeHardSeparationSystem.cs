@@ -4,6 +4,7 @@ using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Jobs;
+using Unity.Jobs.LowLevel.Unsafe;
 using Unity.Mathematics;
 using Unity.Profiling;
 using Unity.Transforms;
@@ -17,6 +18,10 @@ namespace Project.Horde
     [UpdateBefore(typeof(WallRepulsionSystem))]
     public partial struct HordeHardSeparationSystem : ISystem
     {
+        private const int HardDebugSampleStride = 32;
+        private const float HardAppliedEpsSq = 1e-10f;
+        private const float DefaultSlowSpeedFraction = 0.2f;
+
         private static bool s_loggedRunning;
         private static bool s_loggedGridCapacity;
         private static readonly ProfilerMarker BuildGridMarker = new ProfilerMarker("HordeHardSeparation.BuildGrid");
@@ -26,8 +31,14 @@ namespace Project.Horde
 
         private EntityQuery _zombieQuery;
         private EntityQuery _pressureBufferQuery;
+        private Entity _debugStatsEntity;
         private BufferLookup<PressureCell> _pressureLookup;
+        private ComponentLookup<HordeHardSeparationDebugStats> _debugStatsLookup;
         private NativeArray<float> _pressureSnapshot;
+        private NativeArray<int> _debugSampledPerThread;
+        private NativeArray<int> _debugAppliedPerThread;
+        private NativeArray<float> _debugSumDeltaPerThread;
+        private int _debugWorkerCount;
         private NativeParallelHashMap<Entity, float2> _previousSampledPositions;
         private NativeList<Entity> _entities;
         private NativeList<float> _moveSpeeds;
@@ -55,7 +66,12 @@ namespace Project.Horde
             _gridB = new NativeParallelMultiHashMap<int, int>(2048, Allocator.Persistent);
             _previousSampledPositions = new NativeParallelHashMap<Entity, float2>(8192, Allocator.Persistent);
             _pressureLookup = state.GetBufferLookup<PressureCell>(true);
+            _debugStatsLookup = state.GetComponentLookup<HordeHardSeparationDebugStats>(false);
             _pressureBufferQuery = state.GetEntityQuery(ComponentType.ReadOnly<PressureFieldBufferTag>());
+            _debugWorkerCount = math.max(1, JobsUtility.MaxJobThreadCount);
+            _debugSampledPerThread = new NativeArray<int>(_debugWorkerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _debugAppliedPerThread = new NativeArray<int>(_debugWorkerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _debugSumDeltaPerThread = new NativeArray<float>(_debugWorkerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
 
             EntityQuery configQuery = state.GetEntityQuery(ComponentType.ReadWrite<HordeHardSeparationConfig>());
             if (configQuery.IsEmptyIgnoreFilter)
@@ -65,17 +81,30 @@ namespace Project.Horde
                 {
                     Enabled = 1,
                     JamOnly = 1,
-                    JamPressureThreshold = 0f,
+                    JamPressureThreshold = 8f,
+                    DensePressureThreshold = 13f,
+                    SlowSpeedFraction = DefaultSlowSpeedFraction,
                     IterationsJam = 3,
                     MaxNeighborsJam = 32,
-                    MaxPushPerFrameJam = 0.08f,
-                    Radius = 0.10f,
-                    CellSize = 0.10f,
+                    MaxPushPerFrameJam = 0.001f,
+                    Radius = 0.4f,
+                    CellSize = 0.40f,
                     MaxNeighbors = 28,
                     Iterations = 2,
-                    MaxCorrectionPerIter = 0.08f,
+                    MaxCorrectionPerIter = 0.001f,
                     Slop = 0.001f
                 });
+            }
+
+            EntityQuery debugStatsQuery = state.GetEntityQuery(ComponentType.ReadWrite<HordeHardSeparationDebugStats>());
+            if (debugStatsQuery.IsEmptyIgnoreFilter)
+            {
+                _debugStatsEntity = state.EntityManager.CreateEntity(typeof(HordeHardSeparationDebugStats));
+                state.EntityManager.SetComponentData(_debugStatsEntity, default(HordeHardSeparationDebugStats));
+            }
+            else
+            {
+                _debugStatsEntity = debugStatsQuery.GetSingletonEntity();
             }
 
             state.RequireForUpdate(_zombieQuery);
@@ -135,6 +164,21 @@ namespace Project.Horde
             {
                 _pressureSnapshot.Dispose();
             }
+
+            if (_debugSampledPerThread.IsCreated)
+            {
+                _debugSampledPerThread.Dispose();
+            }
+
+            if (_debugAppliedPerThread.IsCreated)
+            {
+                _debugAppliedPerThread.Dispose();
+            }
+
+            if (_debugSumDeltaPerThread.IsCreated)
+            {
+                _debugSumDeltaPerThread.Dispose();
+            }
         }
 
         public void OnUpdate(ref SystemState state)
@@ -145,7 +189,7 @@ namespace Project.Horde
             }
 
             HordePressureConfig pressureConfig = SystemAPI.GetSingleton<HordePressureConfig>();
-            config = SanitizeConfig(config, pressureConfig.BackpressureThreshold);
+            config = SanitizeConfig(config);
             if (config.Enabled == 0)
             {
                 return;
@@ -169,6 +213,8 @@ namespace Project.Horde
                 return;
             }
 
+            EnsureDebugCounterCapacity(ref state);
+
             FlowFieldSingleton flowSingleton = SystemAPI.GetSingleton<FlowFieldSingleton>();
             if (!flowSingleton.Blob.IsCreated)
             {
@@ -184,6 +230,15 @@ namespace Project.Horde
             int iterations = config.JamOnly != 0 ? config.IterationsJam : config.Iterations;
             int maxNeighbors = config.JamOnly != 0 ? config.MaxNeighborsJam : config.MaxNeighbors;
             float maxCorrectionPerIter = config.JamOnly != 0 ? config.MaxPushPerFrameJam : config.MaxCorrectionPerIter;
+            float jamPressureThreshold = config.JamPressureThreshold > 0f
+                ? config.JamPressureThreshold
+                : math.max(0f, pressureConfig.BackpressureThreshold);
+            float densePressureThreshold = config.DensePressureThreshold > 0f
+                ? config.DensePressureThreshold
+                : jamPressureThreshold;
+            float slowSpeedFraction = config.SlowSpeedFraction > 0f
+                ? math.clamp(config.SlowSpeedFraction, 0f, 1f)
+                : DefaultSlowSpeedFraction;
             float minDist = config.Radius * 2f;
             float minDistSq = minDist * minDist;
             float invCellSize = 1f / config.CellSize;
@@ -243,9 +298,10 @@ namespace Project.Horde
                 PressureSnapshot = _pressureSnapshot,
                 JamOnly = config.JamOnly,
                 PressureEnabled = pressureConfig.Enabled,
-                JamPressureThreshold = config.JamPressureThreshold,
+                JamPressureThreshold = jamPressureThreshold,
+                DensePressureThreshold = densePressureThreshold,
                 DeltaTimeWindow = deltaTime,
-                SpeedThresholdFactor = 0.2f
+                SlowSpeedFraction = slowSpeedFraction
             };
             state.Dependency = buildJamMaskJob.Schedule(count, 128, state.Dependency);
 
@@ -309,6 +365,40 @@ namespace Project.Horde
                 posRead = posWrite;
                 posWrite = swap;
             }
+
+            int debugThreadLen = _debugSampledPerThread.Length;
+            ClearHardDebugCountersJob clearHardDebugCountersJob = new ClearHardDebugCountersJob
+            {
+                SampledPerThread = _debugSampledPerThread,
+                AppliedPerThread = _debugAppliedPerThread,
+                SumDeltaPerThread = _debugSumDeltaPerThread
+            };
+            state.Dependency = clearHardDebugCountersJob.Schedule(debugThreadLen, 64, state.Dependency);
+
+            SampleHardDeltaDebugJob sampleHardDeltaDebugJob = new SampleHardDeltaDebugJob
+            {
+                Delta = _deltas.AsArray(),
+                SampledPerThread = _debugSampledPerThread,
+                AppliedPerThread = _debugAppliedPerThread,
+                SumDeltaPerThread = _debugSumDeltaPerThread,
+                WorkerCount = debugThreadLen,
+                SampleStride = HardDebugSampleStride,
+                AppliedEpsSq = HardAppliedEpsSq
+            };
+            state.Dependency = sampleHardDeltaDebugJob.Schedule(count, 128, state.Dependency);
+
+            _debugStatsLookup.Update(ref state);
+            ReduceHardDebugStatsJob reduceHardDebugStatsJob = new ReduceHardDebugStatsJob
+            {
+                SampledPerThread = _debugSampledPerThread,
+                AppliedPerThread = _debugAppliedPerThread,
+                SumDeltaPerThread = _debugSumDeltaPerThread,
+                DebugStatsLookup = _debugStatsLookup,
+                DebugStatsEntity = _debugStatsEntity,
+                LastDt = deltaTime,
+                WorkerCount = debugThreadLen
+            };
+            state.Dependency = reduceHardDebugStatsJob.Schedule(state.Dependency);
 
             using (WriteBackMarker.Auto())
             {
@@ -398,6 +488,32 @@ namespace Project.Horde
             _pressureSnapshot = new NativeArray<float>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
         }
 
+        private void EnsureDebugCounterCapacity(ref SystemState state)
+        {
+            int desired = math.max(1, JobsUtility.MaxJobThreadCount);
+            if (desired == _debugWorkerCount &&
+                _debugSampledPerThread.IsCreated &&
+                _debugSampledPerThread.Length == desired &&
+                _debugAppliedPerThread.IsCreated &&
+                _debugAppliedPerThread.Length == desired &&
+                _debugSumDeltaPerThread.IsCreated &&
+                _debugSumDeltaPerThread.Length == desired)
+            {
+                return;
+            }
+
+            JobHandle disposeHandle = state.Dependency;
+            disposeHandle = DisposeIfCreated(_debugSampledPerThread, disposeHandle);
+            disposeHandle = DisposeIfCreated(_debugAppliedPerThread, disposeHandle);
+            disposeHandle = DisposeIfCreated(_debugSumDeltaPerThread, disposeHandle);
+            state.Dependency = disposeHandle;
+
+            _debugSampledPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _debugAppliedPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _debugSumDeltaPerThread = new NativeArray<float>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _debugWorkerCount = desired;
+        }
+
         private static JobHandle DisposeIfCreated<T>(NativeArray<T> array, JobHandle dependency)
             where T : struct
         {
@@ -409,13 +525,15 @@ namespace Project.Horde
             return array.Dispose(dependency);
         }
 
-        private static HordeHardSeparationConfig SanitizeConfig(HordeHardSeparationConfig config, float fallbackPressureThreshold)
+        private static HordeHardSeparationConfig SanitizeConfig(HordeHardSeparationConfig config)
         {
             config.Enabled = config.Enabled != 0 ? (byte)1 : (byte)0;
             config.JamOnly = config.JamOnly != 0 ? (byte)1 : (byte)0;
-            config.JamPressureThreshold = config.JamPressureThreshold > 0f
-                ? config.JamPressureThreshold
-                : math.max(0f, fallbackPressureThreshold);
+            config.JamPressureThreshold = math.max(0f, config.JamPressureThreshold);
+            config.DensePressureThreshold = math.max(0f, config.DensePressureThreshold);
+            config.SlowSpeedFraction = config.SlowSpeedFraction > 0f
+                ? math.clamp(config.SlowSpeedFraction, 0f, 1f)
+                : DefaultSlowSpeedFraction;
             config.IterationsJam = math.clamp(config.IterationsJam, 1, 3);
             config.MaxNeighborsJam = math.clamp(config.MaxNeighborsJam, 1, 32);
             config.Radius = math.max(0.001f, config.Radius);
@@ -490,8 +608,9 @@ namespace Project.Horde
             public byte JamOnly;
             public byte PressureEnabled;
             public float JamPressureThreshold;
+            public float DensePressureThreshold;
             public float DeltaTimeWindow;
-            public float SpeedThresholdFactor;
+            public float SlowSpeedFraction;
 
             public void Execute(int index)
             {
@@ -503,16 +622,16 @@ namespace Project.Horde
 
                 float2 pos = Positions[index].xy;
                 float localPressure = ResolveLocalPressure(pos);
-                bool dense = PressureEnabled != 0 && localPressure > JamPressureThreshold;
                 bool slow = false;
                 if (PreviousSampledPositions.TryGetValue(Entities[index], out float2 previousPos))
                 {
                     float dist = math.distance(pos, previousPos);
                     float speed = dist / math.max(1e-5f, DeltaTimeWindow);
-                    slow = speed < (MoveSpeeds[index] * SpeedThresholdFactor);
+                    slow = speed < (MoveSpeeds[index] * SlowSpeedFraction);
                 }
 
-                bool jam = dense || (dense && slow);
+                bool jam = PressureEnabled != 0 &&
+                    ((localPressure > JamPressureThreshold) || ((localPressure > DensePressureThreshold) && slow));
                 JamMask[index] = jam ? (byte)1 : (byte)0;
             }
 
@@ -548,6 +667,91 @@ namespace Project.Horde
             private static bool IsInFlowBounds(int2 grid, ref FlowFieldBlob flow)
             {
                 return grid.x >= 0 && grid.y >= 0 && grid.x < flow.Width && grid.y < flow.Height;
+            }
+        }
+
+        [BurstCompile]
+        private struct ClearHardDebugCountersJob : IJobParallelFor
+        {
+            public NativeArray<int> SampledPerThread;
+            public NativeArray<int> AppliedPerThread;
+            public NativeArray<float> SumDeltaPerThread;
+
+            public void Execute(int index)
+            {
+                SampledPerThread[index] = 0;
+                AppliedPerThread[index] = 0;
+                SumDeltaPerThread[index] = 0f;
+            }
+        }
+
+        [BurstCompile]
+        private struct SampleHardDeltaDebugJob : IJobParallelFor
+        {
+            [ReadOnly] public NativeArray<float3> Delta;
+            [NativeDisableParallelForRestriction] public NativeArray<int> SampledPerThread;
+            [NativeDisableParallelForRestriction] public NativeArray<int> AppliedPerThread;
+            [NativeDisableParallelForRestriction] public NativeArray<float> SumDeltaPerThread;
+            [NativeSetThreadIndex] public int ThreadIndex;
+            public int WorkerCount;
+            public int SampleStride;
+            public float AppliedEpsSq;
+
+            public void Execute(int index)
+            {
+                if ((index % SampleStride) != 0)
+                {
+                    return;
+                }
+
+                int workerIndex = math.clamp(ThreadIndex - 1, 0, WorkerCount - 1);
+                SampledPerThread[workerIndex] = SampledPerThread[workerIndex] + 1;
+
+                float2 delta = Delta[index].xy;
+                float lenSq = math.lengthsq(delta);
+                if (lenSq > AppliedEpsSq)
+                {
+                    AppliedPerThread[workerIndex] = AppliedPerThread[workerIndex] + 1;
+                    SumDeltaPerThread[workerIndex] = SumDeltaPerThread[workerIndex] + math.sqrt(lenSq);
+                }
+            }
+        }
+
+        [BurstCompile]
+        private struct ReduceHardDebugStatsJob : IJob
+        {
+            [ReadOnly] public NativeArray<int> SampledPerThread;
+            [ReadOnly] public NativeArray<int> AppliedPerThread;
+            [ReadOnly] public NativeArray<float> SumDeltaPerThread;
+            [NativeDisableParallelForRestriction] public ComponentLookup<HordeHardSeparationDebugStats> DebugStatsLookup;
+            public Entity DebugStatsEntity;
+            public float LastDt;
+            public int WorkerCount;
+
+            public void Execute()
+            {
+                if (!DebugStatsLookup.HasComponent(DebugStatsEntity))
+                {
+                    return;
+                }
+
+                int sampled = 0;
+                int applied = 0;
+                float sumDelta = 0f;
+                for (int i = 0; i < WorkerCount; i++)
+                {
+                    sampled += SampledPerThread[i];
+                    applied += AppliedPerThread[i];
+                    sumDelta += SumDeltaPerThread[i];
+                }
+
+                DebugStatsLookup[DebugStatsEntity] = new HordeHardSeparationDebugStats
+                {
+                    Sampled = sampled,
+                    Applied = applied,
+                    SumDelta = sumDelta,
+                    LastDt = LastDt
+                };
             }
         }
 

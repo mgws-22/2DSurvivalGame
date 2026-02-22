@@ -68,6 +68,8 @@ namespace Project.Horde
         public byte Enabled;
         public byte JamOnly;
         public float JamPressureThreshold;
+        public float DensePressureThreshold;
+        public float SlowSpeedFraction;
         public int IterationsJam;
         public int MaxNeighborsJam;
         public float MaxPushPerFrameJam;
@@ -124,6 +126,7 @@ namespace Project.Horde
     {
         public int Sampled;
         public int OverlapHits;
+        public int ExactOverlapHits;
         public int JamHits;
         public int HardJamEnabledHits;
         public int CapReachedHits;
@@ -131,6 +134,8 @@ namespace Project.Horde
         public int SpeedSamples;
         public int BackpressureActiveHits;
         public int AccelSamples;
+        public int HardAppliedSamples;
+        public int HardAppliedHits;
         public float Dt;
         public float AvgSpeed;
         public float P50Speed;
@@ -141,5 +146,14 @@ namespace Project.Horde
         public float AvgSpeedFraction;
         public float AvgSpeedScale;
         public float MinSpeedScale;
+        public float HardAppliedDeltaSum;
+    }
+
+    public struct HordeHardSeparationDebugStats : IComponentData
+    {
+        public int Sampled;
+        public int Applied;
+        public float SumDelta;
+        public float LastDt;
     }
 }

@@ -33,6 +33,7 @@ namespace Project.Horde
         private NativeParallelHashMap<Entity, float2> _previousSampledVelocities;
         private NativeArray<int> _sampledPerThread;
         private NativeArray<int> _overlapPerThread;
+        private NativeArray<int> _exactOverlapPerThread;
         private NativeArray<int> _jamPerThread;
         private NativeArray<int> _hardJamPerThread;
         private NativeArray<int> _capReachedPerThread;
@@ -51,8 +52,10 @@ namespace Project.Horde
         private NativeArray<int> _speedHistogramReduced;
         private NativeArray<float> _pressureSnapshot;
         private ComponentLookup<HordeTuningQuickMetrics> _metricsLookup;
+        private ComponentLookup<HordeHardSeparationDebugStats> _hardDebugStatsLookup;
         private BufferLookup<PressureCell> _pressureLookup;
         private EntityQuery _pressureBufferQuery;
+        private EntityQuery _hardDebugStatsQuery;
 
         public void OnCreate(ref SystemState state)
         {
@@ -71,6 +74,7 @@ namespace Project.Horde
             _previousSampledVelocities = new NativeParallelHashMap<Entity, float2>(8192, Allocator.Persistent);
             _sampledPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _overlapPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _exactOverlapPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _jamPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _hardJamPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _capReachedPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
@@ -88,8 +92,10 @@ namespace Project.Horde
             _speedHistogramPerThread = new NativeArray<int>(_workerCount * SpeedHistogramBins, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _speedHistogramReduced = new NativeArray<int>(SpeedHistogramBins, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _metricsLookup = state.GetComponentLookup<HordeTuningQuickMetrics>(false);
+            _hardDebugStatsLookup = state.GetComponentLookup<HordeHardSeparationDebugStats>(true);
             _pressureLookup = state.GetBufferLookup<PressureCell>(true);
             _pressureBufferQuery = state.GetEntityQuery(ComponentType.ReadOnly<PressureFieldBufferTag>());
+            _hardDebugStatsQuery = state.GetEntityQuery(ComponentType.ReadOnly<HordeHardSeparationDebugStats>());
 
             EntityQuery configQuery = state.GetEntityQuery(ComponentType.ReadWrite<HordeTuningQuickConfig>());
             if (configQuery.IsEmptyIgnoreFilter)
@@ -167,6 +173,11 @@ namespace Project.Horde
             if (_overlapPerThread.IsCreated)
             {
                 _overlapPerThread.Dispose();
+            }
+
+            if (_exactOverlapPerThread.IsCreated)
+            {
+                _exactOverlapPerThread.Dispose();
             }
 
             if (_jamPerThread.IsCreated)
@@ -267,6 +278,7 @@ namespace Project.Horde
 
             HordeSeparationConfig separationConfig = SystemAPI.GetSingleton<HordeSeparationConfig>();
             HordePressureConfig pressureConfig = SystemAPI.GetSingleton<HordePressureConfig>();
+            bool hasHardConfig = SystemAPI.TryGetSingleton(out HordeHardSeparationConfig hardConfig);
             bool hasAccelerationConfig = SystemAPI.TryGetSingleton(out ZombieAccelerationConfig accelerationConfig);
             float deltaTime = SystemAPI.Time.DeltaTime;
             if (deltaTime <= 0f)
@@ -305,19 +317,26 @@ namespace Project.Horde
                 float separationCap = math.max(0f, separationConfig.MaxPushPerFrame) * simDt;
 
                 float overlapPct = metrics.Sampled > 0 ? (100f * metrics.OverlapHits / metrics.Sampled) : 0f;
+                float exactOverlapPct = metrics.Sampled > 0 ? (100f * metrics.ExactOverlapHits / metrics.Sampled) : 0f;
                 float jamPct = metrics.Sampled > 0 ? (100f * metrics.JamHits / metrics.Sampled) : 0f;
                 float hardJamPct = metrics.Sampled > 0 ? (100f * metrics.HardJamEnabledHits / metrics.Sampled) : 0f;
                 float capReachedPct = metrics.Sampled > 0 ? (100f * metrics.CapReachedHits / metrics.Sampled) : 0f;
                 float avgProcessedNeighbors = metrics.Sampled > 0 ? ((float)metrics.ProcessedNeighborsSum / metrics.Sampled) : 0f;
                 float activeBackpressurePct = metrics.Sampled > 0 ? (100f * metrics.BackpressureActiveHits / metrics.Sampled) : 0f;
+                float hardAppliedPct = metrics.HardAppliedSamples > 0
+                    ? (100f * metrics.HardAppliedHits / metrics.HardAppliedSamples)
+                    : 0f;
+                float avgHardDelta = metrics.HardAppliedHits > 0
+                    ? (metrics.HardAppliedDeltaSum / metrics.HardAppliedHits)
+                    : 0f;
 
                 UnityEngine.Debug.Log(
-                    $"[HordeTune] logIntervalSeconds={logIntervalSeconds:F4} simDt={simDt:F4} sampled={metrics.Sampled} overlap={overlapPct:F1}% jam={jamPct:F1}% " +
+                    $"[HordeTune] logIntervalSeconds={logIntervalSeconds:F4} simDt={simDt:F4} sampled={metrics.Sampled} overlap={overlapPct:F1}% exactOverlap={exactOverlapPct:F1}% jam={jamPct:F1}% " +
                     $"velocity(avg={metrics.AvgSpeed:F2} p50={metrics.P50Speed:F2} p90={metrics.P90Speed:F2} min={metrics.MinSpeed:F2} max={metrics.MaxSpeed:F2}) " +
                     $"accel(avg={metrics.AvgAccel:F2}) " +
                     $"frac(avg={metrics.AvgSpeedFraction:F2}) " +
                     $"backpressure(pressureThreshold={pressureConfig.BackpressureThreshold:F2} k={pressureConfig.BackpressureK:F2} active={activeBackpressurePct:F1}% avgScale={metrics.AvgSpeedScale:F2} minScale={metrics.MinSpeedScale:F2}) " +
-                    $"capReachedHits={capReachedPct:F1}% avgProcessedNeighbors={avgProcessedNeighbors:F2} hardJamEnabled={hardJamPct:F1}% " +
+                    $"capReachedHits={capReachedPct:F1}% avgProcessedNeighbors={avgProcessedNeighbors:F2} hardJamEnabled={hardJamPct:F1}% hardApplied={hardAppliedPct:F1}% avgHardDelta={avgHardDelta:F5} " +
                     $"sepCapFrame={separationCap:F4} pressureCapFrame={pressureEffectiveCap:F4} " +
                     $"sepMaxPushPerFrame={separationConfig.MaxPushPerFrame:F3} pressureMaxPushPerFrame={pressureConfig.MaxPushPerFrame:F3} pressureSpeedFractionCap={pressureConfig.SpeedFractionCap:F2} " +
                     $"backpressureThreshold={pressureConfig.BackpressureThreshold:F2} backpressureK={pressureConfig.BackpressureK:F2} " +
@@ -360,6 +379,15 @@ namespace Project.Horde
             {
                 maxSpeedFactor = minSpeedFactor;
             }
+            float hardJamPressureThreshold = hasHardConfig && hardConfig.JamPressureThreshold > 0f
+                ? hardConfig.JamPressureThreshold
+                : backpressureThreshold;
+            float hardDensePressureThreshold = hasHardConfig && hardConfig.DensePressureThreshold > 0f
+                ? hardConfig.DensePressureThreshold
+                : hardJamPressureThreshold;
+            float hardSlowSpeedFraction = hasHardConfig && hardConfig.SlowSpeedFraction > 0f
+                ? math.clamp(hardConfig.SlowSpeedFraction, 0f, 1f)
+                : 0.2f;
 
             FlowFieldSingleton flowSingleton = SystemAPI.GetSingleton<FlowFieldSingleton>();
             if (!flowSingleton.Blob.IsCreated)
@@ -414,6 +442,7 @@ namespace Project.Horde
             {
                 Sampled = _sampledPerThread,
                 Overlap = _overlapPerThread,
+                ExactOverlap = _exactOverlapPerThread,
                 Jam = _jamPerThread,
                 HardJam = _hardJamPerThread,
                 CapReached = _capReachedPerThread,
@@ -458,6 +487,7 @@ namespace Project.Horde
                 PreviousSampledVelocities = _previousSampledVelocities,
                 SampledPerThread = _sampledPerThread,
                 OverlapPerThread = _overlapPerThread,
+                ExactOverlapPerThread = _exactOverlapPerThread,
                 JamPerThread = _jamPerThread,
                 HardJamPerThread = _hardJamPerThread,
                 CapReachedPerThread = _capReachedPerThread,
@@ -483,19 +513,24 @@ namespace Project.Horde
                 SpeedHistogramBins = SpeedHistogramBins,
                 SpeedHistogramMax = SpeedHistogramMax,
                 BackpressureThreshold = backpressureThreshold,
+                HardJamPressureThreshold = hardJamPressureThreshold,
+                HardDensePressureThreshold = hardDensePressureThreshold,
                 BackpressureK = backpressureK,
                 MinSpeedFactor = minSpeedFactor,
                 MaxSpeedFactor = maxSpeedFactor,
                 PressureEnabled = pressureConfig.Enabled,
+                HardSlowSpeedFraction = hardSlowSpeedFraction,
                 WorkerCount = threadLen
             };
             dependency = evaluateJob.Schedule(count, 128, dependency);
 
             _metricsLookup.Update(ref state);
+            _hardDebugStatsLookup.Update(ref state);
             ReduceQuickMetricsJob reduceJob = new ReduceQuickMetricsJob
             {
                 SampledPerThread = _sampledPerThread,
                 OverlapPerThread = _overlapPerThread,
+                ExactOverlapPerThread = _exactOverlapPerThread,
                 JamPerThread = _jamPerThread,
                 HardJamPerThread = _hardJamPerThread,
                 CapReachedPerThread = _capReachedPerThread,
@@ -513,7 +548,9 @@ namespace Project.Horde
                 SpeedHistogramPerThread = _speedHistogramPerThread,
                 ReducedHistogram = _speedHistogramReduced,
                 MetricsLookup = _metricsLookup,
+                HardDebugStatsLookup = _hardDebugStatsLookup,
                 MetricsEntity = _metricsEntity,
+                HardDebugStatsEntity = _hardDebugStatsQuery.IsEmptyIgnoreFilter ? Entity.Null : _hardDebugStatsQuery.GetSingletonEntity(),
                 Dt = dtWindowForSpeed,
                 HistogramBins = SpeedHistogramBins,
                 SpeedHistogramMax = SpeedHistogramMax,
@@ -599,6 +636,8 @@ namespace Project.Horde
                 _sampledPerThread.Length != desired ||
                 !_overlapPerThread.IsCreated ||
                 _overlapPerThread.Length != desired ||
+                !_exactOverlapPerThread.IsCreated ||
+                _exactOverlapPerThread.Length != desired ||
                 !_jamPerThread.IsCreated ||
                 _jamPerThread.Length != desired ||
                 !_hardJamPerThread.IsCreated ||
@@ -635,6 +674,7 @@ namespace Project.Horde
                 JobHandle disposeHandle = state.Dependency;
                 disposeHandle = DisposeIfCreated(_sampledPerThread, disposeHandle);
                 disposeHandle = DisposeIfCreated(_overlapPerThread, disposeHandle);
+                disposeHandle = DisposeIfCreated(_exactOverlapPerThread, disposeHandle);
                 disposeHandle = DisposeIfCreated(_jamPerThread, disposeHandle);
                 disposeHandle = DisposeIfCreated(_hardJamPerThread, disposeHandle);
                 disposeHandle = DisposeIfCreated(_capReachedPerThread, disposeHandle);
@@ -655,6 +695,7 @@ namespace Project.Horde
 
                 _sampledPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 _overlapPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                _exactOverlapPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 _jamPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 _hardJamPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 _capReachedPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
@@ -778,6 +819,7 @@ namespace Project.Horde
         {
             public NativeArray<int> Sampled;
             public NativeArray<int> Overlap;
+            public NativeArray<int> ExactOverlap;
             public NativeArray<int> Jam;
             public NativeArray<int> HardJam;
             public NativeArray<int> CapReached;
@@ -797,6 +839,7 @@ namespace Project.Horde
             {
                 Sampled[index] = 0;
                 Overlap[index] = 0;
+                ExactOverlap[index] = 0;
                 Jam[index] = 0;
                 HardJam[index] = 0;
                 CapReached[index] = 0;
@@ -838,6 +881,7 @@ namespace Project.Horde
             [ReadOnly] public NativeParallelHashMap<Entity, float2> PreviousSampledVelocities;
             [NativeDisableParallelForRestriction] public NativeArray<int> SampledPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<int> OverlapPerThread;
+            [NativeDisableParallelForRestriction] public NativeArray<int> ExactOverlapPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<int> JamPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<int> HardJamPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<int> CapReachedPerThread;
@@ -864,10 +908,13 @@ namespace Project.Horde
             public int SpeedHistogramBins;
             public float SpeedHistogramMax;
             public float BackpressureThreshold;
+            public float HardJamPressureThreshold;
+            public float HardDensePressureThreshold;
             public float BackpressureK;
             public float MinSpeedFactor;
             public float MaxSpeedFactor;
             public byte PressureEnabled;
+            public float HardSlowSpeedFraction;
             public int WorkerCount;
 
             public void Execute(int index)
@@ -885,7 +932,10 @@ namespace Project.Horde
                 int processed = 0;
                 int localNeighbors = 0;
                 bool overlap = false;
+                bool exactOverlap = false;
                 bool reachedCap = false;
+                const float ExactOverlapEps = 1e-4f;
+                const float ExactOverlapEpsSq = ExactOverlapEps * ExactOverlapEps;
 
                 for (int oy = -1; oy <= 1; oy++)
                 {
@@ -916,6 +966,10 @@ namespace Project.Horde
                             {
                                 overlap = true;
                             }
+                            if (distSq < ExactOverlapEpsSq)
+                            {
+                                exactOverlap = true;
+                            }
 
                             processed++;
                             if (processed >= MaxNeighbors)
@@ -941,6 +995,10 @@ namespace Project.Horde
                 if (overlap)
                 {
                     OverlapPerThread[workerIndex] = OverlapPerThread[workerIndex] + 1;
+                }
+                if (exactOverlap)
+                {
+                    ExactOverlapPerThread[workerIndex] = ExactOverlapPerThread[workerIndex] + 1;
                 }
                 if (reachedCap)
                 {
@@ -986,7 +1044,9 @@ namespace Project.Horde
                     JamPerThread[workerIndex] = JamPerThread[workerIndex] + 1;
                 }
 
-                bool hardJamEnabled = dense || (dense && slow);
+                bool hardJamEnabled = PressureEnabled != 0 &&
+                    ((localPressure > HardJamPressureThreshold) ||
+                     ((localPressure > HardDensePressureThreshold) && (speed < (MoveSpeeds[index] * HardSlowSpeedFraction))));
                 if (hardJamEnabled)
                 {
                     HardJamPerThread[workerIndex] = HardJamPerThread[workerIndex] + 1;
@@ -1045,6 +1105,7 @@ namespace Project.Horde
         {
             [ReadOnly] public NativeArray<int> SampledPerThread;
             [ReadOnly] public NativeArray<int> OverlapPerThread;
+            [ReadOnly] public NativeArray<int> ExactOverlapPerThread;
             [ReadOnly] public NativeArray<int> JamPerThread;
             [ReadOnly] public NativeArray<int> HardJamPerThread;
             [ReadOnly] public NativeArray<int> CapReachedPerThread;
@@ -1062,7 +1123,9 @@ namespace Project.Horde
             [ReadOnly] public NativeArray<int> SpeedHistogramPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<int> ReducedHistogram;
             [NativeDisableParallelForRestriction] public ComponentLookup<HordeTuningQuickMetrics> MetricsLookup;
+            [ReadOnly] public ComponentLookup<HordeHardSeparationDebugStats> HardDebugStatsLookup;
             public Entity MetricsEntity;
+            public Entity HardDebugStatsEntity;
             public float Dt;
             public int HistogramBins;
             public float SpeedHistogramMax;
@@ -1077,6 +1140,7 @@ namespace Project.Horde
 
                 int sampled = 0;
                 int overlap = 0;
+                int exactOverlap = 0;
                 int jam = 0;
                 int hardJam = 0;
                 int capReached = 0;
@@ -1102,6 +1166,7 @@ namespace Project.Horde
                 {
                     sampled += SampledPerThread[i];
                     overlap += OverlapPerThread[i];
+                    exactOverlap += ExactOverlapPerThread[i];
                     jam += JamPerThread[i];
                     hardJam += HardJamPerThread[i];
                     capReached += CapReachedPerThread[i];
@@ -1130,6 +1195,9 @@ namespace Project.Horde
                 float avgAccel = accelSamples > 0 ? (accelSum / accelSamples) : 0f;
                 float avgSpeedFraction = speedSamples > 0 ? (speedFractionSum / speedSamples) : 0f;
                 float avgSpeedScale = sampled > 0 ? (speedScaleSum / sampled) : 1f;
+                int hardAppliedSamples = 0;
+                int hardAppliedHits = 0;
+                float hardAppliedDeltaSum = 0f;
                 if (speedSamples <= 0)
                 {
                     minSpeed = 0f;
@@ -1138,11 +1206,19 @@ namespace Project.Horde
                 {
                     minSpeedScale = 1f;
                 }
+                if (HardDebugStatsEntity != Entity.Null && HardDebugStatsLookup.HasComponent(HardDebugStatsEntity))
+                {
+                    HordeHardSeparationDebugStats hardStats = HardDebugStatsLookup[HardDebugStatsEntity];
+                    hardAppliedSamples = hardStats.Sampled;
+                    hardAppliedHits = hardStats.Applied;
+                    hardAppliedDeltaSum = hardStats.SumDelta;
+                }
 
                 MetricsLookup[MetricsEntity] = new HordeTuningQuickMetrics
                 {
                     Sampled = sampled,
                     OverlapHits = overlap,
+                    ExactOverlapHits = exactOverlap,
                     JamHits = jam,
                     HardJamEnabledHits = hardJam,
                     CapReachedHits = capReached,
@@ -1150,6 +1226,8 @@ namespace Project.Horde
                     SpeedSamples = speedSamples,
                     BackpressureActiveHits = backpressureActive,
                     AccelSamples = accelSamples,
+                    HardAppliedSamples = hardAppliedSamples,
+                    HardAppliedHits = hardAppliedHits,
                     Dt = Dt,
                     AvgSpeed = avgSpeed,
                     P50Speed = p50Speed,
@@ -1159,7 +1237,8 @@ namespace Project.Horde
                     AvgAccel = avgAccel,
                     AvgSpeedFraction = avgSpeedFraction,
                     AvgSpeedScale = avgSpeedScale,
-                    MinSpeedScale = minSpeedScale
+                    MinSpeedScale = minSpeedScale,
+                    HardAppliedDeltaSum = hardAppliedDeltaSum
                 };
             }
 

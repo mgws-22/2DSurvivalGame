@@ -127,7 +127,10 @@ namespace Project.Horde
                     $"DisablePairwiseWhenPressure={(hasPressureConfig ? pressureConfig.DisablePairwiseSeparationWhenPressureEnabled : (byte)0)} " +
                     $"PressureMaxPushPerFrame={pressureMaxPushPerFrame:F3} PressureSpeedFractionCap={pressureSpeedFractionCap:F2} " +
                     $"SoftEnabled=1 SoftMaxNeighbors={config.MaxNeighbors} SoftIterations={config.Iterations} SoftMaxPushPerFrame={config.MaxPushPerFrame:F3} " +
-                    $"HardEnabled={(hasHardConfig ? hardConfig.Enabled : (byte)0)} HardMaxNeighbors={(hasHardConfig ? hardConfig.MaxNeighbors : 0)} HardIterations={(hasHardConfig ? hardConfig.Iterations : 0)} " +
+                    $"HardEnabled={(hasHardConfig ? hardConfig.Enabled : (byte)0)} HardJamOnly={(hasHardConfig ? hardConfig.JamOnly : (byte)0)} " +
+                    $"HardRadius={(hasHardConfig ? hardConfig.Radius : 0f):F3} HardJamPressureThreshold={(hasHardConfig ? hardConfig.JamPressureThreshold : 0f):F3} " +
+                    $"HardDensePressureThreshold={(hasHardConfig ? hardConfig.DensePressureThreshold : 0f):F3} HardSlowSpeedFraction={(hasHardConfig ? hardConfig.SlowSpeedFraction : 0f):F2} " +
+                    $"HardMaxNeighbors={(hasHardConfig ? hardConfig.MaxNeighbors : 0)} HardIterations={(hasHardConfig ? hardConfig.Iterations : 0)} " +
                     $"dt={deltaTime:F4} RefMoveSpeed={referenceMoveSpeed:F2} RefMaxStep={maxStep:F4} " +
                     $"PressureConfigBudgetThisFrame={pressureMaxFromConfig:F4} PressureSpeedBudgetThisFrame={pressureMaxFromSpeed:F4} PressureEffectiveCapThisFrame={pressureMaxThisFrame:F4} " +
                     $"SeparationMaxThisFrame={separationMaxThisFrame:F4} WallMaxThisFrame={wallMaxThisFrame:F4} " +

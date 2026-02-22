@@ -1305,3 +1305,45 @@
 2. Check Console for one `[HordeAccel] cfg ...` line.
 3. Check Console for one `[HordeTune] cfg ... accelCfg(...)` line.
 4. In Entities Hierarchy, search for `ZombieAccelerationConfig` (entity name) and verify values.
+
+## 2026-02-22 - Hard separation jam gating split + apply diagnostics + exact overlap metric
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/ZombieComponents.cs`:
+  - extended `HordeHardSeparationConfig` with:
+    - `DensePressureThreshold` (`<= 0` falls back to jam threshold)
+    - `SlowSpeedFraction` (default `0.2`)
+  - added `HordeHardSeparationDebugStats` singleton (`Sampled`, `Applied`, `SumDelta`, `LastDt`)
+  - extended `HordeTuningQuickMetrics` with `ExactOverlapHits`
+- Updated `Assets/_Project/Scripts/Horde/HordeHardSeparationConfigAuthoring.cs`:
+  - exposed/baked `DensePressureThreshold` and `SlowSpeedFraction` with backward-compatible defaults.
+- Updated `Assets/_Project/Scripts/Horde/HordeHardSeparationSystem.cs`:
+  - fixed hard jam-gating logic to:
+    - `pressure > jamThr || (pressure > denseThr && slow)`
+  - split `jamThr` / `denseThr` at runtime with fallback semantics.
+  - used `SlowSpeedFraction` for slow gating from sampled displacement speed.
+  - added cheap sampled hard-delta instrumentation (per-thread counters + reduce job) writing `HordeHardSeparationDebugStats`.
+- Updated `Assets/_Project/Scripts/Horde/HordeTuningQuickMetricsSystem.cs`:
+  - added sampled `exactOverlap%` (`distSq < (1e-4)^2`)
+  - updated `hardJamEnabled%` metric to match hard jam-gating thresholds
+  - logs hard debug stats (`hardApplied%`, `avgHardDelta`) when present.
+- Updated `Assets/_Project/Scripts/Horde/HordeSeparationSystem.cs`:
+  - extended one-time `[HordeRuntimeDiag]` log with hard knobs:
+    - `HardJamOnly`, `HardRadius`, `HardJamPressureThreshold`, `HardDensePressureThreshold`, `HardSlowSpeedFraction`
+- Updated docs:
+  - `Docs/Systems/Horde/HordeHardSeparation.md`
+  - `Docs/Systems/Horde/HordeTuningQuickMetrics.md`
+
+### Why
+- Hard separation could appear inactive because jam gating only triggered at a high threshold and the previous logic effectively reduced to a dense-only condition.
+- Visual inspection alone was not enough to tell whether the hard solver actually applied deltas.
+- `overlap%` alone did not distinguish dense packing from near-identical stacking.
+
+### How to test
+1. Run `SampleScene` and confirm `[HordeRuntimeDiag]` includes the new hard fields.
+2. Confirm `[HordeTune]` logs include `exactOverlap=...`, `hardApplied=...`, and `avgHardDelta=...`.
+3. Temporarily set hard `JamOnly=0` and verify `hardApplied%` rises in dense areas and `exactOverlap%` trends down.
+4. Restore `JamOnly=1`, lower `DensePressureThreshold`, and verify `hardApplied%` becomes non-trivial in chokepoints without globally enabling hard solve.
+5. Profiler watchlist:
+   - `GC Alloc = 0 B`
+   - no new main-thread sync spikes

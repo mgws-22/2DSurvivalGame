@@ -5,7 +5,7 @@ Provide low-overhead runtime tuning metrics (sampled overlap and jam rates) so c
 
 ## Data
 - `ZombieTag`, `ZombieMoveSpeed`, `ZombieVelocity`, `LocalTransform` (`Assets/_Project/Scripts/Horde/ZombieComponents.cs`)
-- `HordeSeparationConfig`, `HordePressureConfig` (`Assets/_Project/Scripts/Horde/ZombieComponents.cs`)
+- `HordeSeparationConfig`, `HordePressureConfig`, `HordeHardSeparationConfig`, `HordeHardSeparationDebugStats` (`Assets/_Project/Scripts/Horde/ZombieComponents.cs`)
 - `HordeTuningQuickConfig`, `HordeTuningQuickMetrics` (`Assets/_Project/Scripts/Horde/ZombieComponents.cs`)
 - Runtime system:
   - `Assets/_Project/Scripts/Horde/HordeTuningQuickMetricsSystem.cs`
@@ -20,27 +20,37 @@ Provide low-overhead runtime tuning metrics (sampled overlap and jam rates) so c
    - `speedScale = clamp(1 / (1 + BackpressureK * excess), MinSpeedFactor, MaxSpeedFactor)`
 6. `overlap(sample)%`:
    - sampled zombie counts as overlap if any nearby neighbor is closer than `2 * Radius`.
-7. `jam%` (cheap approximation):
+7. `exactOverlap(sample)%`:
+   - sampled zombie counts as exact overlap if any nearby neighbor has `distSq < (1e-4)^2`.
+8. `jam%` (cheap approximation):
    - sampled zombie is jammed if:
      - sampled local pressure is above `BackpressureThreshold`, and
      - sampled velocity magnitude is below `moveSpeed * 0.2`.
-8. Collects observed speed statistics from sampled velocity state (`|ZombieVelocity|`) using per-thread counters and a fixed 32-bin histogram (`0..2 units/s`) for percentile approximation.
-9. Collects sampled acceleration from prior sampled velocity state:
+9. `hardJamEnabled%`:
+   - mirrors hard separation jam-gating using hard config thresholds:
+     - `jamThr = hard.JamPressureThreshold` (fallback to `BackpressureThreshold`)
+     - `denseThr = hard.DensePressureThreshold` (fallback to `jamThr`)
+     - `slow = |ZombieVelocity| < moveSpeed * hard.SlowSpeedFraction`
+     - enabled if `pressure > jamThr || (pressure > denseThr && slow)`
+10. Logs hard-solver application stats from `HordeHardSeparationDebugStats` singleton:
+   - `hardApplied%` = sampled hard deltas above epsilon
+   - `avgHardDelta` = average sampled hard delta magnitude for applied samples
+11. Collects observed speed statistics from sampled velocity state (`|ZombieVelocity|`) using per-thread counters and a fixed 32-bin histogram (`0..2 units/s`) for percentile approximation.
+12. Collects sampled acceleration from prior sampled velocity state:
    - `avgAccel = avg(|vCurrent - vPrevious| / dtWindow)`.
-10. Collects solver-limit diagnostics from sampled neighbor scan:
+13. Collects solver-limit diagnostics from sampled neighbor scan:
    - `capReachedHits%`: sampled units that hit `MaxNeighbors` cap.
    - `avgProcessedNeighbors`: average processed neighbors per sampled unit.
-   - `hardJamEnabled%`: sampled units matching hard-jam condition (`localPressure > threshold` or `dense && slow`).
-11. Logs one `[HordeTune]` line per metrics tick in Editor/Development builds:
+14. Logs one `[HordeTune]` line per metrics tick in Editor/Development builds:
    - startup config line includes acceleration config snapshot (`accelCfg(enabled/timeToMax/maxAccel/decelMul)`).
    - `logIntervalSeconds` for sampling window length
    - `simDt` for current simulation frame dt
-   - overlap/jam percentages
+   - overlap/exactOverlap/jam percentages
    - velocity stats (`avg/p50/p90/min/max`)
    - average acceleration (`avgAccel`)
    - average speed fraction (`observedSpeed / moveSpeed`)
    - backpressure activity (`active%`, `avgScale`, `minScale`)
-   - solver-limit diagnostics (`capReachedHits%`, `avgProcessedNeighbors`, `hardJamEnabled%`)
+   - solver-limit diagnostics (`capReachedHits%`, `avgProcessedNeighbors`, `hardJamEnabled%`, `hardApplied%`, `avgHardDelta`)
    - per-frame cap estimates (`sepCapFrame`, `pressureCapFrame`) plus raw pressure/separation config values.
 
 ## Invariants
@@ -62,7 +72,8 @@ Provide low-overhead runtime tuning metrics (sampled overlap and jam rates) so c
 ## Verification
 1. Enter Play Mode and confirm one startup config log appears: `[HordeTune] cfg ...`.
 2. Confirm periodic logs appear:
-   - `[HordeTune] logIntervalSeconds=... simDt=... sampled=... overlap=... jam=... velocity(... ) accel(avg=... ) frac(... ) backpressure(pressureThreshold=... k=... active=... avgScale=... minScale=...) ...`
+   - `[HordeTune] logIntervalSeconds=... simDt=... sampled=... overlap=... exactOverlap=... jam=... ... hardJamEnabled=... hardApplied=... avgHardDelta=...`
 3. Verify `sepCap > pressureCap` with current tuning.
 4. Verify `backpressure(active=...)` stays low in open flow and rises in chokepoint jams.
-5. Confirm Profiler `GC Alloc` remains `0 B` in gameplay loop.
+5. Set hard `JamOnly=0` temporarily and verify `hardApplied%` increases in dense clumps while `exactOverlap%` trends down.
+6. Confirm Profiler `GC Alloc` remains `0 B` in gameplay loop.
