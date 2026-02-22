@@ -2,6 +2,7 @@ using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
 using UnityEngine;
+using Project.Buildings;
 
 namespace Project.Map
 {
@@ -14,6 +15,7 @@ namespace Project.Map
         private const int DirCount = 32;
         private EntityQuery _mapQuery;
         private EntityQuery _wallFieldQuery;
+        private EntityQuery _dynamicObstacleRegistryQuery;
 
         public void OnCreate(ref SystemState state)
         {
@@ -21,6 +23,9 @@ namespace Project.Map
                 ComponentType.ReadOnly<MapRuntimeData>(),
                 ComponentType.ReadOnly<MapWalkableCell>());
             _wallFieldQuery = state.GetEntityQuery(ComponentType.ReadWrite<WallFieldSingleton>());
+            _dynamicObstacleRegistryQuery = state.GetEntityQuery(
+                ComponentType.ReadOnly<DynamicObstacleRegistryTag>(),
+                ComponentType.ReadOnly<DynamicObstacleRect>());
 
             state.RequireForUpdate<MapRuntimeData>();
             state.RequireForUpdate<MapWalkableCell>();
@@ -64,6 +69,13 @@ namespace Project.Map
             int height = mapHeight + (margin * 2);
             int tileCount = width * height;
             float2 originWorld = map.Origin - (new float2(margin, margin) * map.TileSize);
+            bool hasDynamicObstacles = !_dynamicObstacleRegistryQuery.IsEmptyIgnoreFilter;
+            DynamicBuffer<DynamicObstacleRect> dynamicObstacleRects = default;
+            if (hasDynamicObstacles)
+            {
+                Entity registryEntity = _dynamicObstacleRegistryQuery.GetSingletonEntity();
+                dynamicObstacleRects = state.EntityManager.GetBuffer<DynamicObstacleRect>(registryEntity);
+            }
 
             NativeArray<byte> expandedWalkable = new NativeArray<byte>(tileCount, Allocator.Temp);
             NativeArray<int> dist = new NativeArray<int>(tileCount, Allocator.Temp);
@@ -88,6 +100,10 @@ namespace Project.Map
                         if (mapX >= 0 && mapY >= 0 && mapX < mapWidth && mapY < mapHeight)
                         {
                             isWalkable = walkable[mapX + (mapY * mapWidth)].IsWalkable;
+                            if (isWalkable && hasDynamicObstacles && IsInsideDynamicObstacle(new int2(mapX, mapY), dynamicObstacleRects))
+                            {
+                                isWalkable = false;
+                            }
                         }
 
                         int i = row + x;
@@ -224,6 +240,27 @@ namespace Project.Map
 
             dist[idx] = nextDistance;
             queue[tail++] = idx;
+        }
+
+        private static bool IsInsideDynamicObstacle(int2 mapCell, DynamicBuffer<DynamicObstacleRect> obstacleRects)
+        {
+            for (int i = 0; i < obstacleRects.Length; i++)
+            {
+                DynamicObstacleRect rect = obstacleRects[i];
+                if (mapCell.x < rect.MinCell.x || mapCell.y < rect.MinCell.y)
+                {
+                    continue;
+                }
+
+                if (mapCell.x >= rect.MaxCellExclusive.x || mapCell.y >= rect.MaxCellExclusive.y)
+                {
+                    continue;
+                }
+
+                return true;
+            }
+
+            return false;
         }
 
         private static void BuildDirLut(NativeArray<float2> lut)

@@ -2,6 +2,7 @@
 
 ## Systems
 - [Map Generator (v1)](../Systems/Map/MapGenerator.md)
+- [Building Obstacles (Dynamic WallField Stamps)](../Systems/Buildings/BuildingObstacles.md)
 - [ZombieSpawnSystem](../Systems/Horde/ZombieSpawnSystem.md)
 - [ZombieSteeringSystem](../Systems/Horde/ZombieSteering.md)
 - [HordePressureFieldSystem](../Systems/Horde/HordePressureField.md)

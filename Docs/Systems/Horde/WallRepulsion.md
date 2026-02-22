@@ -17,13 +17,15 @@ Prevent zombies from being pushed into blocked map tiles under crowd pressure by
 3. Sample `WallFieldBlob` using wall-field world origin/cell size (not only map-grid indices), so entities in the out-of-map spawn margin can still evaluate wall distance/normals.
 4. If near wall (`wallDist * tileSize < unitRadius`), apply push along wall normal direction.
 5. Clamp soft wall push by dt-normalized budget: `min(maxWallPushPerFrame * dt, moveSpeed * dt)`.
-6. Safety-check target cell; if target is a blocked map cell, project again with the same nearest-point strategy.
+6. Treat any in-map cell with `wallDist == 0` as blocked (includes dynamic building obstacles stamped into the wall field), even if the base `MapWalkableCell` is walkable.
+7. Safety-check target cell; if target is blocked, project again with the same nearest-point strategy.
 
 ## Invariants
 - Zombies are corrected out of blocked cells.
 - Blocked-cell projection is a hard safety correction (not speed-capped) so entities cannot remain inside wall tiles.
 - Projection uses nearest point inside walkable cells (not center snap) to avoid corner launch/teleport artifacts.
 - Boundary blocked-cell projection may use out-of-map cells as empty candidates to preserve outside-of-map movement while preventing boundary wall penetration.
+- Projection candidate cells must also satisfy `wallDist > 0`, so dynamic building obstacle cells are not selected as "walkable" escape targets.
 - Units are still allowed to exist outside the map bounds (spawn margin), but boundary wall outer faces repel them and prevent wall/cliff penetration from the outside.
 - No Unity Physics colliders/rigidbodies required.
 - Allocation-free per frame in hot path.

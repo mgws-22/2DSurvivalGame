@@ -87,6 +87,7 @@ namespace Project.Horde
                 float2 pos = transform.Position.xy;
                 int2 cell = Map.WorldToGrid(pos);
                 ref WallFieldBlob wall = ref Wall.Value;
+                int2 wallCell = WorldToWallGrid(pos, ref wall);
 
                 if (Map.IsInMap(cell))
                 {
@@ -96,7 +97,7 @@ namespace Project.Horde
                         return;
                     }
 
-                    if (!Walkable[index].IsWalkable)
+                    if (!Walkable[index].IsWalkable || IsWallSeedCell(wallCell, ref wall))
                     {
                         // Hard wall-safety correction: do not speed-cap projection out of blocked tiles.
                         pos = ProjectToNearestWalkable(cell, pos);
@@ -105,7 +106,6 @@ namespace Project.Horde
                     }
                 }
 
-                int2 wallCell = WorldToWallGrid(pos, ref wall);
                 if (IsInWallBounds(wallCell, ref wall))
                 {
                     int wallIndex = wallCell.x + (wallCell.y * wall.Width);
@@ -132,7 +132,9 @@ namespace Project.Horde
                 if (Map.IsInMap(nextCell))
                 {
                     int nextIndex = Map.ToIndex(nextCell);
-                    if (nextIndex >= 0 && nextIndex < Walkable.Length && !Walkable[nextIndex].IsWalkable)
+                    int2 nextWallCell = WorldToWallGrid(pos, ref wall);
+                    if (nextIndex >= 0 && nextIndex < Walkable.Length &&
+                        (!Walkable[nextIndex].IsWalkable || IsWallSeedCell(nextWallCell, ref wall)))
                     {
                         // Hard wall-safety correction remains uncapped.
                         pos = ProjectToNearestWalkable(nextCell, pos);
@@ -153,12 +155,29 @@ namespace Project.Horde
                 return grid.x >= 0 && grid.y >= 0 && grid.x < wall.Width && grid.y < wall.Height;
             }
 
+            private static bool IsWallSeedCell(int2 wallCell, ref WallFieldBlob wall)
+            {
+                if (!IsInWallBounds(wallCell, ref wall))
+                {
+                    return false;
+                }
+
+                int wallIndex = wallCell.x + (wallCell.y * wall.Width);
+                if (wallIndex < 0 || wallIndex >= wall.Dist.Length)
+                {
+                    return false;
+                }
+
+                return wall.Dist[wallIndex] == 0;
+            }
+
             private float2 ProjectToNearestWalkable(int2 blockedCell, float2 currentPos)
             {
                 int maxR = ProjectionRadius;
                 float2 best = currentPos;
                 float bestDistSq = float.MaxValue;
                 bool found = false;
+                ref WallFieldBlob wall = ref Wall.Value;
 
                 for (int r = 1; r <= maxR + 1; r++)
                 {
@@ -172,7 +191,7 @@ namespace Project.Horde
                         for (int x = minX; x <= maxX; x++)
                         {
                             int2 c = new int2(x, y);
-                            if (!IsProjectionCandidateWalkableOrEmpty(c))
+                            if (!IsProjectionCandidateWalkableOrEmpty(c, ref wall))
                             {
                                 continue;
                             }
@@ -197,8 +216,13 @@ namespace Project.Horde
                 return best;
             }
 
-            private bool IsProjectionCandidateWalkableOrEmpty(int2 cell)
+            private bool IsProjectionCandidateWalkableOrEmpty(int2 cell, ref WallFieldBlob wall)
             {
+                if (!IsProjectionCandidateWallFree(cell, ref wall))
+                {
+                    return false;
+                }
+
                 if (!Map.IsInMap(cell))
                 {
                     // Treat out-of-map cells as empty for boundary-wall projection so
@@ -209,6 +233,24 @@ namespace Project.Horde
 
                 int idx = Map.ToIndex(cell);
                 return idx >= 0 && idx < Walkable.Length && Walkable[idx].IsWalkable;
+            }
+
+            private bool IsProjectionCandidateWallFree(int2 cell, ref WallFieldBlob wall)
+            {
+                float2 centerWorld = Map.Origin + ((new float2(cell.x + 0.5f, cell.y + 0.5f)) * Map.TileSize);
+                int2 wallCell = WorldToWallGrid(centerWorld, ref wall);
+                if (!IsInWallBounds(wallCell, ref wall))
+                {
+                    return true;
+                }
+
+                int wallIndex = wallCell.x + (wallCell.y * wall.Width);
+                if (wallIndex < 0 || wallIndex >= wall.Dist.Length)
+                {
+                    return true;
+                }
+
+                return wall.Dist[wallIndex] != 0;
             }
 
             private float2 ClosestPointInsideCell(int2 cell, float2 worldPos)

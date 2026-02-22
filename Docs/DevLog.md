@@ -1448,3 +1448,37 @@
 2. In Profiler, compare `HordeSeparationSystem` CPU time before/after with `Iterations > 1`.
 3. Verify zombie separation still works (minor differences acceptable due stale grid within frame).
 4. Confirm `GC Alloc = 0 B` and no job safety exceptions.
+
+## 2026-02-22 - Building wall obstacles stamp into WallField only
+
+### What changed
+- Added shared building obstacle ECS components in `Assets/_Project/Scripts/Buildings/BuildingObstacleComponents.cs`:
+  - `BuildingTag`
+  - `BuildingFootprint`
+  - `ObstacleStampedTag`
+  - `DynamicObstacleRect` (buffer)
+  - `DynamicObstacleRegistryTag`
+- Added `WallBuildingAuthoring` in `Assets/_Project/Scripts/Buildings/WallBuildingAuthoring.cs` to bake wall buildings into ECS footprint data.
+- Added `BuildingObstacleStampSystem` in `Assets/_Project/Scripts/Buildings/BuildingObstacleStampSystem.cs`:
+  - stamps newly created buildings into the dynamic obstacle rectangle buffer (map-cell space)
+  - adds `ObstacleStampedTag`
+  - dirties only `WallFieldDirtyTag` (does not dirty flow field)
+- Updated `Assets/_Project/Scripts/Map/WallFieldBuildSystem.cs` to treat dynamic obstacle rectangles as blocked seeds during wall-field rebuild.
+- Updated `Assets/_Project/Scripts/Horde/WallRepulsionSystem.cs` to:
+  - treat in-map `wallDist == 0` cells as blocked (for dynamic building footprints)
+  - reject projection candidates whose wall-field distance is `0`
+- Added editor tool `Tools/Buildings/Create Wall Prefab` in `Assets/_Project/Editor/Tools/BuildingPrefabTool.cs` which creates:
+  - `Assets/_Project/Art/Generated/Buildings/WallPlaceholder.png`
+  - `Assets/_Project/Prefabs/Buildings/Wall.prefab`
+- Added docs `Docs/Systems/Buildings/BuildingObstacles.md` and linked it from `Docs/Architecture/Index.md`.
+
+### Why
+- Enemies should continue following the existing flow field (no reroute) while walls/buildings physically block them and create jams.
+- Reusing the existing wall-field + wall-repulsion path keeps the runtime simple, Burst-friendly, and compatible with future building types.
+
+### How to test
+1. Create the prefab via `Tools > Buildings > Create Wall Prefab`.
+2. Place `Assets/_Project/Prefabs/Buildings/Wall.prefab` in a corridor toward the center.
+3. Enter Play Mode and verify enemies walk into it and jam (no reroute around the building).
+4. Force enemies onto the wall footprint and verify they are projected out and cannot remain inside.
+5. Profile and verify `GC Alloc = 0 B` in the play loop with no new safety exceptions.
