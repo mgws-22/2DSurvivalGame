@@ -1249,3 +1249,59 @@
 2. Pan with `W`, `A`, `S`, `D` (or arrow keys).
 3. Scroll mouse wheel and verify zoom follows cursor position on the map.
 4. Verify gameplay loop still has `GC Alloc = 0 B` while panning/zooming.
+
+## 2026-02-22 - Zombie acceleration-limited velocity + velocity/accel tune metrics
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/ZombieComponents.cs`:
+  - added `ZombieVelocity` (`float2 Value`) as per-unit movement state.
+  - added `ZombieAccelerationConfig` singleton (`Enabled`, `TimeToMaxSpeedSeconds`, `MaxAccel`, `DecelMultiplier`).
+  - extended `HordeTuningQuickMetrics` with acceleration fields (`AccelSamples`, `AvgAccel`).
+- Updated `Assets/_Project/Scripts/Horde/ZombieAuthoring.cs`:
+  - baker now initializes `ZombieVelocity` to zero for zombie prefabs, so spawned instances start from rest.
+- Updated `Assets/_Project/Scripts/Horde/ZombieSpawnConfigAuthoring.cs`:
+  - prefab validation/resolution now requires `ZombieVelocity` to avoid selecting stale prefab entities missing velocity state.
+- Updated `Assets/_Project/Scripts/Horde/ZombieSteeringSystem.cs` (`HordeBackpressureSystem`):
+  - added one-time default config creation for `ZombieAccelerationConfig`.
+  - replaced direct step integration with acceleration-limited velocity integration:
+    - `vDesired` from goal intent + backpressure speed scale,
+    - `dv` clamped by magnitude (`MaxAccel * dt`, or `MaxAccel * DecelMultiplier * dt` when slowing),
+    - `ZombieVelocity` updated and integrated into `LocalTransform`.
+- Updated `Assets/_Project/Scripts/Horde/HordeTuningQuickMetricsSystem.cs`:
+  - metrics query now includes `ZombieVelocity`.
+  - speed statistics now use sampled `|ZombieVelocity|`.
+  - added sampled acceleration metric: `avg(|v - vPrev| / dtWindow)`.
+  - extended `[HordeTune]` dev log output with `velocity(avg/p50/p90/min/max)` and `accel(avg=...)`.
+
+### Why
+- Instant velocity changes made crowd motion look snappy and reduced control over approach/braking behavior in dense zones.
+- A velocity state plus accel/decel caps keeps pressure-scaled steering intent intact while smoothing motion transitions at low cost.
+- Quick metrics now report the actual commanded velocity state and sampled acceleration, making tuning of backpressure + acceleration behavior observable during play.
+
+### How to test
+1. Enter Play Mode with horde spawning enabled and confirm zombies ramp up to speed instead of snapping instantly.
+2. In Inspector (runtime ECS), verify `ZombieAccelerationConfig` singleton exists with defaults (`Enabled=1`, `TimeToMaxSpeedSeconds=0.35`, `DecelMultiplier=2`).
+3. Confirm `[HordeTune]` logs include `velocity(avg/p50/p90/...)` and `accel(avg=...)` in Editor/Development builds.
+4. In chokepoints, verify backpressure still slows groups while separation/wall systems continue resolving overlap/collision.
+5. Profiler watchlist: `GC Alloc = 0 B` in gameplay loop, no added main-thread sync spikes.
+
+## 2026-02-22 - Acceleration config discoverability diagnostics
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/ZombieSteeringSystem.cs` (`HordeBackpressureSystem`):
+  - added one-time Editor/Development startup log:
+    - `[HordeAccel] cfg enabled=... timeToMax=... maxAccel=... decelMultiplier=...`
+  - names the runtime singleton entity as `ZombieAccelerationConfig` for easier lookup in Entities view.
+- Updated `Assets/_Project/Scripts/Horde/HordeTuningQuickMetricsSystem.cs`:
+  - extended the startup `[HordeTune] cfg ...` line with:
+    - `accelCfg(enabled=... timeToMax=... maxAccel=... decelMul=...)`.
+
+### Why
+- Runtime singleton existed but was hard to verify quickly in Entities view and logs.
+- Added explicit diagnostics so acceleration config presence/defaults are visible immediately in Play Mode.
+
+### How to test
+1. Enter Play Mode in Editor/Development build.
+2. Check Console for one `[HordeAccel] cfg ...` line.
+3. Check Console for one `[HordeTune] cfg ... accelCfg(...)` line.
+4. In Entities Hierarchy, search for `ZombieAccelerationConfig` (entity name) and verify values.

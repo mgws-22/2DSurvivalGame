@@ -439,7 +439,7 @@ MonoBehaviour:
   _zombiePrefab: {fileID: 2940900018987325336, guid: 4272358af0497654bbe12dbc757acdf4, type: 3}
   _spawnRate: 22
   _spawnBatchSize: 222
-  _maxAlive: 55555
+  _maxAlive: 35555
   _seed: 12345
 --- !u!4 &1862250333
 Transform:
@@ -471,15 +471,15 @@ MonoBehaviour:
   _enabled: 1
   _jamOnly: 1
   _jamPressureThreshold: 0
-  _iterationsJam: 3
-  _maxNeighborsJam: 32
-  _maxPushPerFrameJam: 0.08
+  _iterationsJam: 2
+  _maxNeighborsJam: 1
+  _maxPushPerFrameJam: 33
   _radius: 0.2
-  _cellSize: 0.1
-  _maxNeighbors: 28
+  _cellSize: 1
+  _maxNeighbors: 1
   _iterations: 2
-  _maxCorrectionPerIter: 0.08
-  _slop: 0.09
+  _maxCorrectionPerIter: 33222
+  _slop: 1
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

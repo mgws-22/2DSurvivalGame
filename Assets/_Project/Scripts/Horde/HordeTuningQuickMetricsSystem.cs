@@ -28,8 +28,9 @@ namespace Project.Horde
         private NativeList<Entity> _entities;
         private NativeList<float2> _positions;
         private NativeList<float> _moveSpeeds;
+        private NativeList<float2> _velocities;
         private NativeParallelMultiHashMap<int, int> _cellToIndex;
-        private NativeParallelHashMap<Entity, float2> _previousSampledPositions;
+        private NativeParallelHashMap<Entity, float2> _previousSampledVelocities;
         private NativeArray<int> _sampledPerThread;
         private NativeArray<int> _overlapPerThread;
         private NativeArray<int> _jamPerThread;
@@ -37,8 +38,10 @@ namespace Project.Horde
         private NativeArray<int> _capReachedPerThread;
         private NativeArray<int> _processedNeighborsPerThread;
         private NativeArray<int> _speedSamplesPerThread;
+        private NativeArray<int> _accelSamplesPerThread;
         private NativeArray<int> _backpressureActivePerThread;
         private NativeArray<float> _speedSumPerThread;
+        private NativeArray<float> _accelSumPerThread;
         private NativeArray<float> _speedFractionSumPerThread;
         private NativeArray<float> _speedScaleSumPerThread;
         private NativeArray<float> _speedMinPerThread;
@@ -56,14 +59,16 @@ namespace Project.Horde
             _zombieQuery = state.GetEntityQuery(
                 ComponentType.ReadOnly<ZombieTag>(),
                 ComponentType.ReadOnly<ZombieMoveSpeed>(),
+                ComponentType.ReadOnly<ZombieVelocity>(),
                 ComponentType.ReadOnly<LocalTransform>());
 
             _workerCount = math.max(1, JobsUtility.MaxJobThreadCount);
             _entities = new NativeList<Entity>(1024, Allocator.Persistent);
             _positions = new NativeList<float2>(1024, Allocator.Persistent);
             _moveSpeeds = new NativeList<float>(1024, Allocator.Persistent);
+            _velocities = new NativeList<float2>(1024, Allocator.Persistent);
             _cellToIndex = new NativeParallelMultiHashMap<int, int>(4096, Allocator.Persistent);
-            _previousSampledPositions = new NativeParallelHashMap<Entity, float2>(8192, Allocator.Persistent);
+            _previousSampledVelocities = new NativeParallelHashMap<Entity, float2>(8192, Allocator.Persistent);
             _sampledPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _overlapPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _jamPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
@@ -71,8 +76,10 @@ namespace Project.Horde
             _capReachedPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _processedNeighborsPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _speedSamplesPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _accelSamplesPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _backpressureActivePerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _speedSumPerThread = new NativeArray<float>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _accelSumPerThread = new NativeArray<float>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _speedFractionSumPerThread = new NativeArray<float>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _speedScaleSumPerThread = new NativeArray<float>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _speedMinPerThread = new NativeArray<float>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
@@ -137,14 +144,19 @@ namespace Project.Horde
                 _moveSpeeds.Dispose();
             }
 
+            if (_velocities.IsCreated)
+            {
+                _velocities.Dispose();
+            }
+
             if (_cellToIndex.IsCreated)
             {
                 _cellToIndex.Dispose();
             }
 
-            if (_previousSampledPositions.IsCreated)
+            if (_previousSampledVelocities.IsCreated)
             {
-                _previousSampledPositions.Dispose();
+                _previousSampledVelocities.Dispose();
             }
 
             if (_sampledPerThread.IsCreated)
@@ -182,6 +194,11 @@ namespace Project.Horde
                 _speedSamplesPerThread.Dispose();
             }
 
+            if (_accelSamplesPerThread.IsCreated)
+            {
+                _accelSamplesPerThread.Dispose();
+            }
+
             if (_backpressureActivePerThread.IsCreated)
             {
                 _backpressureActivePerThread.Dispose();
@@ -190,6 +207,11 @@ namespace Project.Horde
             if (_speedSumPerThread.IsCreated)
             {
                 _speedSumPerThread.Dispose();
+            }
+
+            if (_accelSumPerThread.IsCreated)
+            {
+                _accelSumPerThread.Dispose();
             }
 
             if (_speedFractionSumPerThread.IsCreated)
@@ -245,6 +267,7 @@ namespace Project.Horde
 
             HordeSeparationConfig separationConfig = SystemAPI.GetSingleton<HordeSeparationConfig>();
             HordePressureConfig pressureConfig = SystemAPI.GetSingleton<HordePressureConfig>();
+            bool hasAccelerationConfig = SystemAPI.TryGetSingleton(out ZombieAccelerationConfig accelerationConfig);
             float deltaTime = SystemAPI.Time.DeltaTime;
             if (deltaTime <= 0f)
             {
@@ -261,6 +284,10 @@ namespace Project.Horde
                     $"pressureMaxPushPerFrame={pressureConfig.MaxPushPerFrame:F2} backpressureThreshold={pressureConfig.BackpressureThreshold:F2} " +
                     $"minSpeedFactor={pressureConfig.MinSpeedFactor:F2} maxSpeedFactor={pressureConfig.BackpressureMaxFactor:F2} backpressureK={pressureConfig.BackpressureK:F2} " +
                     $"sepMaxPushPerFrame={separationConfig.MaxPushPerFrame:F2} sepIterations={separationConfig.Iterations} radius={separationConfig.Radius:F3} " +
+                    $"accelCfg(enabled={(hasAccelerationConfig ? accelerationConfig.Enabled : (byte)0)} " +
+                    $"timeToMax={(hasAccelerationConfig ? accelerationConfig.TimeToMaxSpeedSeconds : 0f):F3} " +
+                    $"maxAccel={(hasAccelerationConfig ? accelerationConfig.MaxAccel : 0f):F3} " +
+                    $"decelMul={(hasAccelerationConfig ? accelerationConfig.DecelMultiplier : 0f):F2}) " +
                     $"logEveryFrames={quickConfig.LogEveryNFrames} sampleStride={quickConfig.SampleStride}");
                 s_loggedConfigOnce = true;
             }
@@ -286,7 +313,8 @@ namespace Project.Horde
 
                 UnityEngine.Debug.Log(
                     $"[HordeTune] logIntervalSeconds={logIntervalSeconds:F4} simDt={simDt:F4} sampled={metrics.Sampled} overlap={overlapPct:F1}% jam={jamPct:F1}% " +
-                    $"speed(avg={metrics.AvgSpeed:F2} p50={metrics.P50Speed:F2} p90={metrics.P90Speed:F2} min={metrics.MinSpeed:F2} max={metrics.MaxSpeed:F2}) " +
+                    $"velocity(avg={metrics.AvgSpeed:F2} p50={metrics.P50Speed:F2} p90={metrics.P90Speed:F2} min={metrics.MinSpeed:F2} max={metrics.MaxSpeed:F2}) " +
+                    $"accel(avg={metrics.AvgAccel:F2}) " +
                     $"frac(avg={metrics.AvgSpeedFraction:F2}) " +
                     $"backpressure(pressureThreshold={pressureConfig.BackpressureThreshold:F2} k={pressureConfig.BackpressureK:F2} active={activeBackpressurePct:F1}% avgScale={metrics.AvgSpeedScale:F2} minScale={metrics.MinSpeedScale:F2}) " +
                     $"capReachedHits={capReachedPct:F1}% avgProcessedNeighbors={avgProcessedNeighbors:F2} hardJamEnabled={hardJamPct:F1}% " +
@@ -354,6 +382,7 @@ namespace Project.Horde
             _entities.ResizeUninitialized(count);
             _positions.ResizeUninitialized(count);
             _moveSpeeds.ResizeUninitialized(count);
+            _velocities.ResizeUninitialized(count);
 
             JobHandle dependency = state.Dependency;
             int threadLen = _sampledPerThread.Length;
@@ -362,7 +391,8 @@ namespace Project.Horde
             {
                 Entities = _entities.AsArray(),
                 Positions = _positions.AsArray(),
-                MoveSpeeds = _moveSpeeds.AsArray()
+                MoveSpeeds = _moveSpeeds.AsArray(),
+                Velocities = _velocities.AsArray()
             };
             dependency = gatherJob.ScheduleParallel(dependency);
 
@@ -389,8 +419,10 @@ namespace Project.Horde
                 CapReached = _capReachedPerThread,
                 ProcessedNeighbors = _processedNeighborsPerThread,
                 SpeedSamples = _speedSamplesPerThread,
+                AccelSamples = _accelSamplesPerThread,
                 BackpressureActive = _backpressureActivePerThread,
                 SpeedSum = _speedSumPerThread,
+                AccelSum = _accelSumPerThread,
                 SpeedFractionSum = _speedFractionSumPerThread,
                 SpeedScaleSum = _speedScaleSumPerThread,
                 SpeedMin = _speedMinPerThread,
@@ -419,10 +451,11 @@ namespace Project.Horde
                 Entities = _entities.AsArray(),
                 Positions = _positions.AsArray(),
                 MoveSpeeds = _moveSpeeds.AsArray(),
+                Velocities = _velocities.AsArray(),
                 Grid = _cellToIndex,
                 Flow = flowSingleton.Blob,
                 PressureSnapshot = _pressureSnapshot,
-                PreviousSampledPositions = _previousSampledPositions,
+                PreviousSampledVelocities = _previousSampledVelocities,
                 SampledPerThread = _sampledPerThread,
                 OverlapPerThread = _overlapPerThread,
                 JamPerThread = _jamPerThread,
@@ -430,8 +463,10 @@ namespace Project.Horde
                 CapReachedPerThread = _capReachedPerThread,
                 ProcessedNeighborsPerThread = _processedNeighborsPerThread,
                 SpeedSamplesPerThread = _speedSamplesPerThread,
+                AccelSamplesPerThread = _accelSamplesPerThread,
                 BackpressureActivePerThread = _backpressureActivePerThread,
                 SpeedSumPerThread = _speedSumPerThread,
+                AccelSumPerThread = _accelSumPerThread,
                 SpeedFractionSumPerThread = _speedFractionSumPerThread,
                 SpeedScaleSumPerThread = _speedScaleSumPerThread,
                 SpeedMinPerThread = _speedMinPerThread,
@@ -466,8 +501,10 @@ namespace Project.Horde
                 CapReachedPerThread = _capReachedPerThread,
                 ProcessedNeighborsPerThread = _processedNeighborsPerThread,
                 SpeedSamplesPerThread = _speedSamplesPerThread,
+                AccelSamplesPerThread = _accelSamplesPerThread,
                 BackpressureActivePerThread = _backpressureActivePerThread,
                 SpeedSumPerThread = _speedSumPerThread,
+                AccelSumPerThread = _accelSumPerThread,
                 SpeedFractionSumPerThread = _speedFractionSumPerThread,
                 SpeedScaleSumPerThread = _speedScaleSumPerThread,
                 SpeedMinPerThread = _speedMinPerThread,
@@ -486,16 +523,16 @@ namespace Project.Horde
 
             ClearSampledMapJob clearSampledMapJob = new ClearSampledMapJob
             {
-                Map = _previousSampledPositions
+                Map = _previousSampledVelocities
             };
             dependency = clearSampledMapJob.Schedule(dependency);
 
-            StoreSampledPositionsJob storeSampledJob = new StoreSampledPositionsJob
+            StoreSampledVelocitiesJob storeSampledJob = new StoreSampledVelocitiesJob
             {
                 Entities = _entities.AsArray(),
-                Positions = _positions.AsArray(),
+                Velocities = _velocities.AsArray(),
                 SampleStride = sampleStride,
-                Writer = _previousSampledPositions.AsParallelWriter()
+                Writer = _previousSampledVelocities.AsParallelWriter()
             };
             dependency = storeSampledJob.Schedule(count, 128, dependency);
 
@@ -520,13 +557,23 @@ namespace Project.Horde
                 _moveSpeeds.Capacity = math.ceilpow2(count);
             }
 
+            if (_velocities.Capacity < count)
+            {
+                _velocities.Capacity = math.ceilpow2(count);
+            }
+
             int requiredGridCapacity = math.max(1024, count * 12);
             if (_cellToIndex.Capacity < requiredGridCapacity)
             {
                 _cellToIndex.Capacity = requiredGridCapacity;
             }
 
-            _ = sampleStride;
+            int sampledCount = math.max(64, (count + (sampleStride - 1)) / sampleStride);
+            int requiredSampledVelocityCapacity = math.ceilpow2(sampledCount * 2);
+            if (_previousSampledVelocities.Capacity < requiredSampledVelocityCapacity)
+            {
+                _previousSampledVelocities.Capacity = requiredSampledVelocityCapacity;
+            }
         }
 
         private void EnsurePressureSnapshotCapacity(ref SystemState state, int flowCellCount)
@@ -562,10 +609,14 @@ namespace Project.Horde
                 _processedNeighborsPerThread.Length != desired ||
                 !_speedSamplesPerThread.IsCreated ||
                 _speedSamplesPerThread.Length != desired ||
+                !_accelSamplesPerThread.IsCreated ||
+                _accelSamplesPerThread.Length != desired ||
                 !_backpressureActivePerThread.IsCreated ||
                 _backpressureActivePerThread.Length != desired ||
                 !_speedSumPerThread.IsCreated ||
                 _speedSumPerThread.Length != desired ||
+                !_accelSumPerThread.IsCreated ||
+                _accelSumPerThread.Length != desired ||
                 !_speedFractionSumPerThread.IsCreated ||
                 _speedFractionSumPerThread.Length != desired ||
                 !_speedScaleSumPerThread.IsCreated ||
@@ -589,8 +640,10 @@ namespace Project.Horde
                 disposeHandle = DisposeIfCreated(_capReachedPerThread, disposeHandle);
                 disposeHandle = DisposeIfCreated(_processedNeighborsPerThread, disposeHandle);
                 disposeHandle = DisposeIfCreated(_speedSamplesPerThread, disposeHandle);
+                disposeHandle = DisposeIfCreated(_accelSamplesPerThread, disposeHandle);
                 disposeHandle = DisposeIfCreated(_backpressureActivePerThread, disposeHandle);
                 disposeHandle = DisposeIfCreated(_speedSumPerThread, disposeHandle);
+                disposeHandle = DisposeIfCreated(_accelSumPerThread, disposeHandle);
                 disposeHandle = DisposeIfCreated(_speedFractionSumPerThread, disposeHandle);
                 disposeHandle = DisposeIfCreated(_speedScaleSumPerThread, disposeHandle);
                 disposeHandle = DisposeIfCreated(_speedMinPerThread, disposeHandle);
@@ -607,8 +660,10 @@ namespace Project.Horde
                 _capReachedPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 _processedNeighborsPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 _speedSamplesPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                _accelSamplesPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 _backpressureActivePerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 _speedSumPerThread = new NativeArray<float>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                _accelSumPerThread = new NativeArray<float>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 _speedFractionSumPerThread = new NativeArray<float>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 _speedScaleSumPerThread = new NativeArray<float>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 _speedMinPerThread = new NativeArray<float>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
@@ -646,12 +701,20 @@ namespace Project.Horde
             [NativeDisableParallelForRestriction] public NativeArray<Entity> Entities;
             [NativeDisableParallelForRestriction] public NativeArray<float2> Positions;
             [NativeDisableParallelForRestriction] public NativeArray<float> MoveSpeeds;
+            [NativeDisableParallelForRestriction] public NativeArray<float2> Velocities;
 
-            private void Execute(Entity entity, [EntityIndexInQuery] int index, in ZombieTag tag, in LocalTransform transform, in ZombieMoveSpeed moveSpeed)
+            private void Execute(
+                Entity entity,
+                [EntityIndexInQuery] int index,
+                in ZombieTag tag,
+                in LocalTransform transform,
+                in ZombieMoveSpeed moveSpeed,
+                in ZombieVelocity velocity)
             {
                 Entities[index] = entity;
                 Positions[index] = transform.Position.xy;
                 MoveSpeeds[index] = math.max(0f, moveSpeed.Value);
+                Velocities[index] = velocity.Value;
             }
         }
 
@@ -720,8 +783,10 @@ namespace Project.Horde
             public NativeArray<int> CapReached;
             public NativeArray<int> ProcessedNeighbors;
             public NativeArray<int> SpeedSamples;
+            public NativeArray<int> AccelSamples;
             public NativeArray<int> BackpressureActive;
             public NativeArray<float> SpeedSum;
+            public NativeArray<float> AccelSum;
             public NativeArray<float> SpeedFractionSum;
             public NativeArray<float> SpeedScaleSum;
             public NativeArray<float> SpeedMin;
@@ -737,8 +802,10 @@ namespace Project.Horde
                 CapReached[index] = 0;
                 ProcessedNeighbors[index] = 0;
                 SpeedSamples[index] = 0;
+                AccelSamples[index] = 0;
                 BackpressureActive[index] = 0;
                 SpeedSum[index] = 0f;
+                AccelSum[index] = 0f;
                 SpeedFractionSum[index] = 0f;
                 SpeedScaleSum[index] = 0f;
                 SpeedMin[index] = float.MaxValue;
@@ -764,10 +831,11 @@ namespace Project.Horde
             [ReadOnly] public NativeArray<Entity> Entities;
             [ReadOnly] public NativeArray<float2> Positions;
             [ReadOnly] public NativeArray<float> MoveSpeeds;
+            [ReadOnly] public NativeArray<float2> Velocities;
             [ReadOnly] public NativeParallelMultiHashMap<int, int> Grid;
             [ReadOnly] public BlobAssetReference<FlowFieldBlob> Flow;
             [ReadOnly] public NativeArray<float> PressureSnapshot;
-            [ReadOnly] public NativeParallelHashMap<Entity, float2> PreviousSampledPositions;
+            [ReadOnly] public NativeParallelHashMap<Entity, float2> PreviousSampledVelocities;
             [NativeDisableParallelForRestriction] public NativeArray<int> SampledPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<int> OverlapPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<int> JamPerThread;
@@ -775,8 +843,10 @@ namespace Project.Horde
             [NativeDisableParallelForRestriction] public NativeArray<int> CapReachedPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<int> ProcessedNeighborsPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<int> SpeedSamplesPerThread;
+            [NativeDisableParallelForRestriction] public NativeArray<int> AccelSamplesPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<int> BackpressureActivePerThread;
             [NativeDisableParallelForRestriction] public NativeArray<float> SpeedSumPerThread;
+            [NativeDisableParallelForRestriction] public NativeArray<float> AccelSumPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<float> SpeedFractionSumPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<float> SpeedScaleSumPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<float> SpeedMinPerThread;
@@ -888,26 +958,27 @@ namespace Project.Horde
                 }
 
                 bool dense = PressureEnabled != 0 && localPressure > BackpressureThreshold;
-                bool slow = false;
+                float speed = math.length(Velocities[index]);
+                float speedFraction = speed / math.max(1e-5f, MoveSpeeds[index]);
+                bool slow = speed < (MoveSpeeds[index] * SpeedThresholdFactor);
                 Entity entity = Entities[index];
-                if (PreviousSampledPositions.TryGetValue(entity, out float2 previousPos))
+                SpeedSamplesPerThread[workerIndex] = SpeedSamplesPerThread[workerIndex] + 1;
+                SpeedSumPerThread[workerIndex] = SpeedSumPerThread[workerIndex] + speed;
+                SpeedFractionSumPerThread[workerIndex] = SpeedFractionSumPerThread[workerIndex] + speedFraction;
+                SpeedMinPerThread[workerIndex] = math.min(SpeedMinPerThread[workerIndex], speed);
+                SpeedMaxPerThread[workerIndex] = math.max(SpeedMaxPerThread[workerIndex], speed);
+
+                float clampedSpeed = math.clamp(speed, 0f, SpeedHistogramMax);
+                int speedBin = (int)math.floor((clampedSpeed / SpeedHistogramMax) * (SpeedHistogramBins - 1));
+                speedBin = math.clamp(speedBin, 0, SpeedHistogramBins - 1);
+                int histIndex = (workerIndex * SpeedHistogramBins) + speedBin;
+                SpeedHistogramPerThread[histIndex] = SpeedHistogramPerThread[histIndex] + 1;
+
+                if (PreviousSampledVelocities.TryGetValue(entity, out float2 previousVelocity))
                 {
-                    float dist = math.distance(pos, previousPos);
-                    float speed = dist / math.max(1e-5f, DeltaTimeWindow);
-                    float speedFraction = speed / math.max(1e-5f, MoveSpeeds[index]);
-                    slow = speed < (MoveSpeeds[index] * SpeedThresholdFactor);
-
-                    SpeedSamplesPerThread[workerIndex] = SpeedSamplesPerThread[workerIndex] + 1;
-                    SpeedSumPerThread[workerIndex] = SpeedSumPerThread[workerIndex] + speed;
-                    SpeedFractionSumPerThread[workerIndex] = SpeedFractionSumPerThread[workerIndex] + speedFraction;
-                    SpeedMinPerThread[workerIndex] = math.min(SpeedMinPerThread[workerIndex], speed);
-                    SpeedMaxPerThread[workerIndex] = math.max(SpeedMaxPerThread[workerIndex], speed);
-
-                    float clampedSpeed = math.clamp(speed, 0f, SpeedHistogramMax);
-                    int speedBin = (int)math.floor((clampedSpeed / SpeedHistogramMax) * (SpeedHistogramBins - 1));
-                    speedBin = math.clamp(speedBin, 0, SpeedHistogramBins - 1);
-                    int histIndex = (workerIndex * SpeedHistogramBins) + speedBin;
-                    SpeedHistogramPerThread[histIndex] = SpeedHistogramPerThread[histIndex] + 1;
+                    float accel = math.length(Velocities[index] - previousVelocity) / math.max(1e-5f, DeltaTimeWindow);
+                    AccelSamplesPerThread[workerIndex] = AccelSamplesPerThread[workerIndex] + 1;
+                    AccelSumPerThread[workerIndex] = AccelSumPerThread[workerIndex] + accel;
                 }
 
                 if (slow && dense)
@@ -979,8 +1050,10 @@ namespace Project.Horde
             [ReadOnly] public NativeArray<int> CapReachedPerThread;
             [ReadOnly] public NativeArray<int> ProcessedNeighborsPerThread;
             [ReadOnly] public NativeArray<int> SpeedSamplesPerThread;
+            [ReadOnly] public NativeArray<int> AccelSamplesPerThread;
             [ReadOnly] public NativeArray<int> BackpressureActivePerThread;
             [ReadOnly] public NativeArray<float> SpeedSumPerThread;
+            [ReadOnly] public NativeArray<float> AccelSumPerThread;
             [ReadOnly] public NativeArray<float> SpeedFractionSumPerThread;
             [ReadOnly] public NativeArray<float> SpeedScaleSumPerThread;
             [ReadOnly] public NativeArray<float> SpeedMinPerThread;
@@ -1009,8 +1082,10 @@ namespace Project.Horde
                 int capReached = 0;
                 int processedNeighbors = 0;
                 int speedSamples = 0;
+                int accelSamples = 0;
                 int backpressureActive = 0;
                 float speedSum = 0f;
+                float accelSum = 0f;
                 float speedFractionSum = 0f;
                 float speedScaleSum = 0f;
                 float minSpeed = float.MaxValue;
@@ -1032,8 +1107,10 @@ namespace Project.Horde
                     capReached += CapReachedPerThread[i];
                     processedNeighbors += ProcessedNeighborsPerThread[i];
                     speedSamples += SpeedSamplesPerThread[i];
+                    accelSamples += AccelSamplesPerThread[i];
                     backpressureActive += BackpressureActivePerThread[i];
                     speedSum += SpeedSumPerThread[i];
+                    accelSum += AccelSumPerThread[i];
                     speedFractionSum += SpeedFractionSumPerThread[i];
                     speedScaleSum += SpeedScaleSumPerThread[i];
                     minSpeed = math.min(minSpeed, SpeedMinPerThread[i]);
@@ -1050,6 +1127,7 @@ namespace Project.Horde
                 float p50Speed = ResolvePercentile(ReducedHistogram, speedSamples, 0.50f);
                 float p90Speed = ResolvePercentile(ReducedHistogram, speedSamples, 0.90f);
                 float avgSpeed = speedSamples > 0 ? (speedSum / speedSamples) : 0f;
+                float avgAccel = accelSamples > 0 ? (accelSum / accelSamples) : 0f;
                 float avgSpeedFraction = speedSamples > 0 ? (speedFractionSum / speedSamples) : 0f;
                 float avgSpeedScale = sampled > 0 ? (speedScaleSum / sampled) : 1f;
                 if (speedSamples <= 0)
@@ -1071,12 +1149,14 @@ namespace Project.Horde
                     ProcessedNeighborsSum = processedNeighbors,
                     SpeedSamples = speedSamples,
                     BackpressureActiveHits = backpressureActive,
+                    AccelSamples = accelSamples,
                     Dt = Dt,
                     AvgSpeed = avgSpeed,
                     P50Speed = p50Speed,
                     P90Speed = p90Speed,
                     MinSpeed = minSpeed,
                     MaxSpeed = maxSpeed,
+                    AvgAccel = avgAccel,
                     AvgSpeedFraction = avgSpeedFraction,
                     AvgSpeedScale = avgSpeedScale,
                     MinSpeedScale = minSpeedScale
@@ -1118,10 +1198,10 @@ namespace Project.Horde
         }
 
         [BurstCompile]
-        private struct StoreSampledPositionsJob : IJobParallelFor
+        private struct StoreSampledVelocitiesJob : IJobParallelFor
         {
             [ReadOnly] public NativeArray<Entity> Entities;
-            [ReadOnly] public NativeArray<float2> Positions;
+            [ReadOnly] public NativeArray<float2> Velocities;
             public int SampleStride;
             public NativeParallelHashMap<Entity, float2>.ParallelWriter Writer;
 
@@ -1132,7 +1212,7 @@ namespace Project.Horde
                     return;
                 }
 
-                Writer.TryAdd(Entities[index], Positions[index]);
+                Writer.TryAdd(Entities[index], Velocities[index]);
             }
         }
 

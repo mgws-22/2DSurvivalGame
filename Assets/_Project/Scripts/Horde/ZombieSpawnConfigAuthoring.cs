@@ -212,7 +212,9 @@ namespace Project.Horde
             return prefabEntity != Entity.Null &&
                    entityManager.Exists(prefabEntity) &&
                    entityManager.HasComponent<Prefab>(prefabEntity) &&
-                   entityManager.HasComponent<ZombieTag>(prefabEntity);
+                   entityManager.HasComponent<ZombieTag>(prefabEntity) &&
+                   entityManager.HasComponent<ZombieMoveSpeed>(prefabEntity) &&
+                   entityManager.HasComponent<ZombieVelocity>(prefabEntity);
         }
 
         private static Entity SelectConfigEntity(EntityManager entityManager, NativeArray<Entity> entities)
@@ -265,6 +267,11 @@ namespace Project.Horde
                 }
 
                 if (!entityManager.HasComponent<ZombieMoveSpeed>(candidate))
+                {
+                    continue;
+                }
+
+                if (!entityManager.HasComponent<ZombieVelocity>(candidate))
                 {
                     continue;
                 }

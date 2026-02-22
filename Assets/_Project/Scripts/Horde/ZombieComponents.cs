@@ -12,6 +12,11 @@ namespace Project.Horde
         public float Value;
     }
 
+    public struct ZombieVelocity : IComponentData
+    {
+        public float2 Value;
+    }
+
     public struct ZombieSteeringState : IComponentData
     {
         public float2 LastDirection;
@@ -91,6 +96,14 @@ namespace Project.Horde
         public byte DisablePairwiseSeparationWhenPressureEnabled;
     }
 
+    public struct ZombieAccelerationConfig : IComponentData
+    {
+        public byte Enabled;
+        public float TimeToMaxSpeedSeconds;
+        public float MaxAccel;
+        public float DecelMultiplier;
+    }
+
     public struct PressureFieldBufferTag : IComponentData
     {
     }
@@ -117,12 +130,14 @@ namespace Project.Horde
         public int ProcessedNeighborsSum;
         public int SpeedSamples;
         public int BackpressureActiveHits;
+        public int AccelSamples;
         public float Dt;
         public float AvgSpeed;
         public float P50Speed;
         public float P90Speed;
         public float MinSpeed;
         public float MaxSpeed;
+        public float AvgAccel;
         public float AvgSpeedFraction;
         public float AvgSpeedScale;
         public float MinSpeedScale;

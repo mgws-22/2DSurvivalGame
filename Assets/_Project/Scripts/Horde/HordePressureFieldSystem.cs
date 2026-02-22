@@ -51,7 +51,7 @@ namespace Project.Horde
                     TargetUnitsPerCell = 1.8f,
 
                     // Mycket lägre än 10: pressure ska inte kännas som en separat motor
-                    PressureStrength = 10f,
+                    PressureStrength = 5f,
 
                     // Sätt högt så att SpeedFractionCap blir den verkliga begränsningen
                     // (då blir beteendet mer förutsägbart)

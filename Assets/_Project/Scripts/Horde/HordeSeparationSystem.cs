@@ -51,15 +51,15 @@ namespace Project.Horde
                     Radius = 0.20f,
 
                     CellSizeFactor = 1.25f,
-                    InfluenceRadiusFactor = 5.00f, // tuning: widen local neighbor awareness to reduce high overlap
+                    InfluenceRadiusFactor = 2.00f, // tuning: widen local neighbor awareness to reduce high overlap
 
                     // SeparationStrength: håll modest för att undvika jitter,
                     // låt iterations + caps göra jobbet.
-                    SeparationStrength = 2.00f,
+                    SeparationStrength = 1.00f,
 
                     // Se till att separation inte är "för snål" i trängsel.
                     // Om du har global speed clamp (moveSpeed*dt) kan du sätta den högre.
-                    MaxPushPerFrame = 12.2f, // tuning: Rule1 run-2, raise soft authority for persistent high overlap
+                    MaxPushPerFrame = 2.2f, // tuning: Rule1 run-2, raise soft authority for persistent high overlap
 
                     MaxNeighbors = 32,
 
