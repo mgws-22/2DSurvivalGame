@@ -10,6 +10,7 @@
 - [WallRepulsionSystem](../Systems/Horde/WallRepulsion.md)
 - [HordeTuningQuickMetricsSystem](../Systems/Horde/HordeTuningQuickMetrics.md)
 - [Flow Field Pathfinding (Plan A)](../Systems/Horde/FlowFieldPathfinding.md)
+- [CameraWasdZoomController](../Systems/Camera/CameraWasdZoomController.md)
 
 ## Build/Compilation
 - [ECS Compilation Expectations](ECSCompilation.md)

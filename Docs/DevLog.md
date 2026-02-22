@@ -1199,3 +1199,53 @@
 4. Profiler watchlist:
    - `GC Alloc = 0 B`
    - no new sync-point spikes.
+
+## 2026-02-22 - Stability fix: hard-grid overflow + soft clamp correctness
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordeHardSeparationSystem.cs`:
+  - grid capacity is now explicitly sized from entity count before build:
+    - `expectedAdds = count * insertsPerEntity` (`insertsPerEntity=1`)
+    - required capacity uses slack factor `2` and `ceilpow2`.
+  - added dependency-chained `ClearGridJob` before each hard-separation grid build iteration.
+  - added one-time Editor/Development log with `count`, `gridCapacity`, `expectedAdds`, `insertsPerEntity`.
+- Updated `Assets/_Project/Scripts/Horde/HordeSeparationSystem.cs`:
+  - replaced `math.saturate(config.SeparationStrength)` with `math.clamp(config.SeparationStrength, 0f, 8f)`.
+  - expanded iterations clamp from `1..2` to `1..8`.
+  - added one-time Editor/Development log for used `separationStrength`/`iterations` and whether old clamps would have changed values.
+
+### Why
+- Hard solver could hit `HashMap is full` when grid entries accumulated across iterations or capacity was too tight for current count.
+- Soft solver silently clamped tuning (`SeparationStrength` and `Iterations`) to narrower ranges, making high-value tuning appear ineffective.
+
+### How to test
+1. Run a dense horde scene with hard separation enabled and verify no `HashMap is full` exception.
+2. Confirm one-time hard log appears with expected grid sizing values.
+3. In Editor/Development, set `SeparationStrength > 1` and `Iterations > 2`, then confirm one-time soft log reports the used values and old-clamp warning.
+4. Profiler watchlist:
+   - `GC Alloc = 0 B`
+   - no added main-thread sync spikes.
+
+## 2026-02-22 - Camera controls: WASD pan + mouse-centric zoom
+
+### What changed
+- Added `Assets/_Project/Scripts/CameraWasdZoomController.cs`:
+  - pans camera with `WASD` (and arrow keys).
+  - supports shift speed multiplier for pan.
+  - zooms orthographic camera with mouse wheel toward mouse cursor world position.
+  - clamps zoom between configurable min/max orthographic size.
+- Updated `Assets/Scenes/SampleScene.unity`:
+  - attached `CameraWasdZoomController` to `Main Camera`.
+- Added docs:
+  - `Docs/Systems/Camera/CameraWasdZoomController.md`
+  - linked from `Docs/Architecture/Index.md`.
+
+### Why
+- Needed direct map navigation controls during play for faster testing and tuning.
+- Mouse-centric zoom improves precision compared to zooming toward screen center.
+
+### How to test
+1. Open `SampleScene` and enter Play Mode.
+2. Pan with `W`, `A`, `S`, `D` (or arrow keys).
+3. Scroll mouse wheel and verify zoom follows cursor position on the map.
+4. Verify gameplay loop still has `GC Alloc = 0 B` while panning/zooming.

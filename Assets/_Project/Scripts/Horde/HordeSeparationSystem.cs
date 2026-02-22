@@ -15,6 +15,7 @@ namespace Project.Horde
     public partial struct HordeSeparationSystem : ISystem
     {
         private static bool s_loggedRuntimeDiagnostics;
+        private static bool s_loggedTuningUse;
         private EntityQuery _zombieQuery;
         private NativeList<Entity> _entities;
         private NativeList<float2> _positionsA;
@@ -148,10 +149,32 @@ namespace Project.Horde
             float minDistSq = minDist * minDist;
             float influenceRadius = minDist * math.max(1f, config.InfluenceRadiusFactor);
             float influenceRadiusSq = influenceRadius * influenceRadius;
-            float separationStrength = math.saturate(config.SeparationStrength);
+            float separationStrength = math.clamp(config.SeparationStrength, 0f, 8f);
             float maxPushThisFrame = math.max(0f, config.MaxPushPerFrame) * deltaTime;
             int maxNeighbors = math.clamp(config.MaxNeighbors, 4, 64);
-            int iterations = math.clamp(config.Iterations, 1, 2);
+            int iterations = math.clamp(config.Iterations, 1, 8);
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (!s_loggedTuningUse)
+            {
+                bool oldStrengthClampWouldApply = config.SeparationStrength < 0f || config.SeparationStrength > 1f;
+                bool oldIterationClampWouldApply = config.Iterations < 1 || config.Iterations > 2;
+                string used = "[HordeSeparation] Using separationStrength=" + separationStrength.ToString("F3") +
+                    " iterations=" + iterations + ".";
+                if (oldStrengthClampWouldApply || oldIterationClampWouldApply)
+                {
+                    UnityEngine.Debug.Log(
+                        used + " Old clamps would have applied (strength0to1=" + oldStrengthClampWouldApply +
+                        ", iterations1to2=" + oldIterationClampWouldApply + ").");
+                }
+                else
+                {
+                    UnityEngine.Debug.Log(used);
+                }
+
+                s_loggedTuningUse = true;
+            }
+#endif
             _localTransformLookup.Update(ref state);
 
             EnsureCapacity(count);

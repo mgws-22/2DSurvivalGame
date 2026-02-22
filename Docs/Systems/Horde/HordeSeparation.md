@@ -21,7 +21,8 @@ Per frame:
 8. Clamp correction by dt-normalized budget `min(maxPushPerFrame * dt, moveSpeed * dt)` (distributed per iteration) so total soft push cannot exceed unit speed budget.
 9. Apply corrected positions.
 
-Optional second pass is supported via `Iterations` (clamped to `1..2`).
+Optional multi-pass is supported via `Iterations` (clamped to `1..8`).
+`SeparationStrength` is clamped to `0..8` at runtime (not saturated to `0..1`).
 
 ## Default Tuning
 - `Radius = 0.05`

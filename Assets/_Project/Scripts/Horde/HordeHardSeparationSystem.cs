@@ -18,6 +18,7 @@ namespace Project.Horde
     public partial struct HordeHardSeparationSystem : ISystem
     {
         private static bool s_loggedRunning;
+        private static bool s_loggedGridCapacity;
         private static readonly ProfilerMarker BuildGridMarker = new ProfilerMarker("HordeHardSeparation.BuildGrid");
         private static readonly ProfilerMarker IterationComputeMarker = new ProfilerMarker("HordeHardSeparation.IterationCompute");
         private static readonly ProfilerMarker IterationApplyMarker = new ProfilerMarker("HordeHardSeparation.IterationApply");
@@ -186,8 +187,11 @@ namespace Project.Horde
             float minDist = config.Radius * 2f;
             float minDistSq = minDist * minDist;
             float invCellSize = 1f / config.CellSize;
+            const int gridInsertsPerEntity = 1;
+            int expectedGridAdds = math.max(1, count * gridInsertsPerEntity);
+            int requiredGridCapacity = math.ceilpow2(math.max(1, expectedGridAdds * 2));
 
-            EnsureCapacity(count);
+            EnsureCapacity(count, requiredGridCapacity);
             EnsurePressureSnapshotCapacity(ref state, flowCellCount);
             _entities.ResizeUninitialized(count);
             _moveSpeeds.ResizeUninitialized(count);
@@ -195,8 +199,16 @@ namespace Project.Horde
             _positionsA.ResizeUninitialized(count);
             _positionsB.ResizeUninitialized(count);
             _deltas.ResizeUninitialized(count);
-            _gridA.Clear();
-            _gridB.Clear();
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (!s_loggedGridCapacity)
+            {
+                UnityEngine.Debug.Log(
+                    $"[HordeHardSeparation] gridCapacity count={count} gridCapacity={_gridA.Capacity} " +
+                    $"expectedAdds={expectedGridAdds} insertsPerEntity={gridInsertsPerEntity}");
+                s_loggedGridCapacity = true;
+            }
+#endif
 
             GatherPositionsJob gatherJob = new GatherPositionsJob
             {
@@ -245,6 +257,11 @@ namespace Project.Horde
             for (int iteration = 0; iteration < iterations; iteration++)
             {
                 NativeParallelMultiHashMap<int, int> grid = (iteration & 1) == 0 ? _gridA : _gridB;
+                ClearGridJob clearGridJob = new ClearGridJob
+                {
+                    Grid = grid
+                };
+                state.Dependency = clearGridJob.Schedule(state.Dependency);
 
                 using (BuildGridMarker.Auto())
                 {
@@ -317,7 +334,7 @@ namespace Project.Horde
             state.Dependency = storeSampledJob.Schedule(count, 128, state.Dependency);
         }
 
-        private void EnsureCapacity(int count)
+        private void EnsureCapacity(int count, int requiredGridCapacity)
         {
             int target = math.ceilpow2(count);
             if (_entities.Capacity < target)
@@ -350,14 +367,14 @@ namespace Project.Horde
                 _deltas.Capacity = target;
             }
 
-            if (_gridA.Capacity < target)
+            if (_gridA.Capacity < requiredGridCapacity)
             {
-                _gridA.Capacity = target;
+                _gridA.Capacity = requiredGridCapacity;
             }
 
-            if (_gridB.Capacity < target)
+            if (_gridB.Capacity < requiredGridCapacity)
             {
-                _gridB.Capacity = target;
+                _gridB.Capacity = requiredGridCapacity;
             }
 
             int sampledCapacity = math.max(8192, target * 2);
@@ -555,6 +572,17 @@ namespace Project.Horde
             public void Execute(int index)
             {
                 Writer.TryAdd(Entities[index], Positions[index].xy);
+            }
+        }
+
+        [BurstCompile]
+        private struct ClearGridJob : IJob
+        {
+            public NativeParallelMultiHashMap<int, int> Grid;
+
+            public void Execute()
+            {
+                Grid.Clear();
             }
         }
 

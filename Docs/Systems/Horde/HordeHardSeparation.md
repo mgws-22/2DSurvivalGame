@@ -22,6 +22,7 @@ Per frame when enabled:
 3. Build per-unit jam mask:
    - jam if `localPressure > JamPressureThreshold` OR (`dense && slow`) using existing metrics logic.
 4. Build a spatial hash grid (`NativeParallelMultiHashMap<int,int>`).
+   - per-iteration clear is dependency-chained in jobs (no main-thread sync).
 5. For each zombie, scan 3x3 neighbor cells.
 6. Process up to `MaxNeighbors` (or `MaxNeighborsJam` in jam mode) candidates.
 7. For penetrations under `2*Radius`, accumulate correction in `delta[i]` only.
@@ -37,6 +38,7 @@ Per frame when enabled:
 - Compute pass is race-free: each worker writes only `delta[i]`.
 - No per-frame managed allocations in hot path.
 - Neighbor work is bounded by `MaxNeighbors`.
+- Grid capacity is pre-sized from entity count with slack before build to avoid runtime overflow.
 - If `JamOnly = 1`, non-jam units always write zero hard-separation delta.
 - Update order: after `ZombieSteeringSystem` + `HordePressureFieldSystem` + `HordeSeparationSystem`, before `WallRepulsionSystem`.
 
