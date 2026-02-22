@@ -33,6 +33,9 @@ namespace Project.Horde
         private NativeArray<int> _sampledPerThread;
         private NativeArray<int> _overlapPerThread;
         private NativeArray<int> _jamPerThread;
+        private NativeArray<int> _hardJamPerThread;
+        private NativeArray<int> _capReachedPerThread;
+        private NativeArray<int> _processedNeighborsPerThread;
         private NativeArray<int> _speedSamplesPerThread;
         private NativeArray<int> _backpressureActivePerThread;
         private NativeArray<float> _speedSumPerThread;
@@ -64,6 +67,9 @@ namespace Project.Horde
             _sampledPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _overlapPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _jamPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _hardJamPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _capReachedPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _processedNeighborsPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _speedSamplesPerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _backpressureActivePerThread = new NativeArray<int>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _speedSumPerThread = new NativeArray<float>(_workerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
@@ -154,6 +160,21 @@ namespace Project.Horde
             if (_jamPerThread.IsCreated)
             {
                 _jamPerThread.Dispose();
+            }
+
+            if (_hardJamPerThread.IsCreated)
+            {
+                _hardJamPerThread.Dispose();
+            }
+
+            if (_capReachedPerThread.IsCreated)
+            {
+                _capReachedPerThread.Dispose();
+            }
+
+            if (_processedNeighborsPerThread.IsCreated)
+            {
+                _processedNeighborsPerThread.Dispose();
             }
 
             if (_speedSamplesPerThread.IsCreated)
@@ -258,6 +279,9 @@ namespace Project.Horde
 
                 float overlapPct = metrics.Sampled > 0 ? (100f * metrics.OverlapHits / metrics.Sampled) : 0f;
                 float jamPct = metrics.Sampled > 0 ? (100f * metrics.JamHits / metrics.Sampled) : 0f;
+                float hardJamPct = metrics.Sampled > 0 ? (100f * metrics.HardJamEnabledHits / metrics.Sampled) : 0f;
+                float capReachedPct = metrics.Sampled > 0 ? (100f * metrics.CapReachedHits / metrics.Sampled) : 0f;
+                float avgProcessedNeighbors = metrics.Sampled > 0 ? ((float)metrics.ProcessedNeighborsSum / metrics.Sampled) : 0f;
                 float activeBackpressurePct = metrics.Sampled > 0 ? (100f * metrics.BackpressureActiveHits / metrics.Sampled) : 0f;
 
                 UnityEngine.Debug.Log(
@@ -265,6 +289,7 @@ namespace Project.Horde
                     $"speed(avg={metrics.AvgSpeed:F2} p50={metrics.P50Speed:F2} p90={metrics.P90Speed:F2} min={metrics.MinSpeed:F2} max={metrics.MaxSpeed:F2}) " +
                     $"frac(avg={metrics.AvgSpeedFraction:F2}) " +
                     $"backpressure(pressureThreshold={pressureConfig.BackpressureThreshold:F2} k={pressureConfig.BackpressureK:F2} active={activeBackpressurePct:F1}% avgScale={metrics.AvgSpeedScale:F2} minScale={metrics.MinSpeedScale:F2}) " +
+                    $"capReachedHits={capReachedPct:F1}% avgProcessedNeighbors={avgProcessedNeighbors:F2} hardJamEnabled={hardJamPct:F1}% " +
                     $"sepCapFrame={separationCap:F4} pressureCapFrame={pressureEffectiveCap:F4} " +
                     $"sepMaxPushPerFrame={separationConfig.MaxPushPerFrame:F3} pressureMaxPushPerFrame={pressureConfig.MaxPushPerFrame:F3} pressureSpeedFractionCap={pressureConfig.SpeedFractionCap:F2} " +
                     $"backpressureThreshold={pressureConfig.BackpressureThreshold:F2} backpressureK={pressureConfig.BackpressureK:F2} " +
@@ -360,6 +385,9 @@ namespace Project.Horde
                 Sampled = _sampledPerThread,
                 Overlap = _overlapPerThread,
                 Jam = _jamPerThread,
+                HardJam = _hardJamPerThread,
+                CapReached = _capReachedPerThread,
+                ProcessedNeighbors = _processedNeighborsPerThread,
                 SpeedSamples = _speedSamplesPerThread,
                 BackpressureActive = _backpressureActivePerThread,
                 SpeedSum = _speedSumPerThread,
@@ -398,6 +426,9 @@ namespace Project.Horde
                 SampledPerThread = _sampledPerThread,
                 OverlapPerThread = _overlapPerThread,
                 JamPerThread = _jamPerThread,
+                HardJamPerThread = _hardJamPerThread,
+                CapReachedPerThread = _capReachedPerThread,
+                ProcessedNeighborsPerThread = _processedNeighborsPerThread,
                 SpeedSamplesPerThread = _speedSamplesPerThread,
                 BackpressureActivePerThread = _backpressureActivePerThread,
                 SpeedSumPerThread = _speedSumPerThread,
@@ -431,6 +462,9 @@ namespace Project.Horde
                 SampledPerThread = _sampledPerThread,
                 OverlapPerThread = _overlapPerThread,
                 JamPerThread = _jamPerThread,
+                HardJamPerThread = _hardJamPerThread,
+                CapReachedPerThread = _capReachedPerThread,
+                ProcessedNeighborsPerThread = _processedNeighborsPerThread,
                 SpeedSamplesPerThread = _speedSamplesPerThread,
                 BackpressureActivePerThread = _backpressureActivePerThread,
                 SpeedSumPerThread = _speedSumPerThread,
@@ -520,6 +554,12 @@ namespace Project.Horde
                 _overlapPerThread.Length != desired ||
                 !_jamPerThread.IsCreated ||
                 _jamPerThread.Length != desired ||
+                !_hardJamPerThread.IsCreated ||
+                _hardJamPerThread.Length != desired ||
+                !_capReachedPerThread.IsCreated ||
+                _capReachedPerThread.Length != desired ||
+                !_processedNeighborsPerThread.IsCreated ||
+                _processedNeighborsPerThread.Length != desired ||
                 !_speedSamplesPerThread.IsCreated ||
                 _speedSamplesPerThread.Length != desired ||
                 !_backpressureActivePerThread.IsCreated ||
@@ -545,6 +585,9 @@ namespace Project.Horde
                 disposeHandle = DisposeIfCreated(_sampledPerThread, disposeHandle);
                 disposeHandle = DisposeIfCreated(_overlapPerThread, disposeHandle);
                 disposeHandle = DisposeIfCreated(_jamPerThread, disposeHandle);
+                disposeHandle = DisposeIfCreated(_hardJamPerThread, disposeHandle);
+                disposeHandle = DisposeIfCreated(_capReachedPerThread, disposeHandle);
+                disposeHandle = DisposeIfCreated(_processedNeighborsPerThread, disposeHandle);
                 disposeHandle = DisposeIfCreated(_speedSamplesPerThread, disposeHandle);
                 disposeHandle = DisposeIfCreated(_backpressureActivePerThread, disposeHandle);
                 disposeHandle = DisposeIfCreated(_speedSumPerThread, disposeHandle);
@@ -560,6 +603,9 @@ namespace Project.Horde
                 _sampledPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 _overlapPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 _jamPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                _hardJamPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                _capReachedPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                _processedNeighborsPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 _speedSamplesPerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 _backpressureActivePerThread = new NativeArray<int>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 _speedSumPerThread = new NativeArray<float>(desired, Allocator.Persistent, NativeArrayOptions.ClearMemory);
@@ -670,6 +716,9 @@ namespace Project.Horde
             public NativeArray<int> Sampled;
             public NativeArray<int> Overlap;
             public NativeArray<int> Jam;
+            public NativeArray<int> HardJam;
+            public NativeArray<int> CapReached;
+            public NativeArray<int> ProcessedNeighbors;
             public NativeArray<int> SpeedSamples;
             public NativeArray<int> BackpressureActive;
             public NativeArray<float> SpeedSum;
@@ -684,6 +733,9 @@ namespace Project.Horde
                 Sampled[index] = 0;
                 Overlap[index] = 0;
                 Jam[index] = 0;
+                HardJam[index] = 0;
+                CapReached[index] = 0;
+                ProcessedNeighbors[index] = 0;
                 SpeedSamples[index] = 0;
                 BackpressureActive[index] = 0;
                 SpeedSum[index] = 0f;
@@ -719,6 +771,9 @@ namespace Project.Horde
             [NativeDisableParallelForRestriction] public NativeArray<int> SampledPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<int> OverlapPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<int> JamPerThread;
+            [NativeDisableParallelForRestriction] public NativeArray<int> HardJamPerThread;
+            [NativeDisableParallelForRestriction] public NativeArray<int> CapReachedPerThread;
+            [NativeDisableParallelForRestriction] public NativeArray<int> ProcessedNeighborsPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<int> SpeedSamplesPerThread;
             [NativeDisableParallelForRestriction] public NativeArray<int> BackpressureActivePerThread;
             [NativeDisableParallelForRestriction] public NativeArray<float> SpeedSumPerThread;
@@ -817,6 +872,11 @@ namespace Project.Horde
                 {
                     OverlapPerThread[workerIndex] = OverlapPerThread[workerIndex] + 1;
                 }
+                if (reachedCap)
+                {
+                    CapReachedPerThread[workerIndex] = CapReachedPerThread[workerIndex] + 1;
+                }
+                ProcessedNeighborsPerThread[workerIndex] = ProcessedNeighborsPerThread[workerIndex] + processed;
 
                 float localPressure = ResolveLocalPressure(pos);
                 float speedScale = ComputeSpeedScaleFromPressure(localPressure);
@@ -853,6 +913,12 @@ namespace Project.Horde
                 if (slow && dense)
                 {
                     JamPerThread[workerIndex] = JamPerThread[workerIndex] + 1;
+                }
+
+                bool hardJamEnabled = dense || (dense && slow);
+                if (hardJamEnabled)
+                {
+                    HardJamPerThread[workerIndex] = HardJamPerThread[workerIndex] + 1;
                 }
             }
 
@@ -909,6 +975,9 @@ namespace Project.Horde
             [ReadOnly] public NativeArray<int> SampledPerThread;
             [ReadOnly] public NativeArray<int> OverlapPerThread;
             [ReadOnly] public NativeArray<int> JamPerThread;
+            [ReadOnly] public NativeArray<int> HardJamPerThread;
+            [ReadOnly] public NativeArray<int> CapReachedPerThread;
+            [ReadOnly] public NativeArray<int> ProcessedNeighborsPerThread;
             [ReadOnly] public NativeArray<int> SpeedSamplesPerThread;
             [ReadOnly] public NativeArray<int> BackpressureActivePerThread;
             [ReadOnly] public NativeArray<float> SpeedSumPerThread;
@@ -936,6 +1005,9 @@ namespace Project.Horde
                 int sampled = 0;
                 int overlap = 0;
                 int jam = 0;
+                int hardJam = 0;
+                int capReached = 0;
+                int processedNeighbors = 0;
                 int speedSamples = 0;
                 int backpressureActive = 0;
                 float speedSum = 0f;
@@ -956,6 +1028,9 @@ namespace Project.Horde
                     sampled += SampledPerThread[i];
                     overlap += OverlapPerThread[i];
                     jam += JamPerThread[i];
+                    hardJam += HardJamPerThread[i];
+                    capReached += CapReachedPerThread[i];
+                    processedNeighbors += ProcessedNeighborsPerThread[i];
                     speedSamples += SpeedSamplesPerThread[i];
                     backpressureActive += BackpressureActivePerThread[i];
                     speedSum += SpeedSumPerThread[i];
@@ -991,6 +1066,9 @@ namespace Project.Horde
                     Sampled = sampled,
                     OverlapHits = overlap,
                     JamHits = jam,
+                    HardJamEnabledHits = hardJam,
+                    CapReachedHits = capReached,
+                    ProcessedNeighborsSum = processedNeighbors,
                     SpeedSamples = speedSamples,
                     BackpressureActiveHits = backpressureActive,
                     Dt = Dt,

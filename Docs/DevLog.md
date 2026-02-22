@@ -1163,3 +1163,39 @@
 2. Confirm early and mid windows keep `backpressure active` low while `avgScale` stays closer to `1.0`.
 3. Check whether overlap and jam escalate slower and peak lower than the previous run.
 4. Verify no new sync points and `GC Alloc = 0 B` in gameplay.
+
+## 2026-02-21 - Diagnostics wiring: separation limiter visibility + jam-only hard separation
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordeTuningQuickMetricsSystem.cs`:
+  - added sampled solver-limit counters:
+    - `capReachedHits%` (sampled units that hit `MaxNeighbors` cap)
+    - `avgProcessedNeighbors`
+    - `hardJamEnabled%` (sampled units classified jam for hard solver gating)
+  - extended metrics reduction and `[HordeTune]` log output with the new values.
+- Updated `Assets/_Project/Scripts/Horde/ZombieComponents.cs`:
+  - extended `HordeTuningQuickMetrics` with `HardJamEnabledHits`, `CapReachedHits`, `ProcessedNeighborsSum`.
+  - extended `HordeHardSeparationConfig` with jam-only fields:
+    - `JamOnly`, `JamPressureThreshold`, `IterationsJam`, `MaxNeighborsJam`, `MaxPushPerFrameJam`.
+- Updated `Assets/_Project/Scripts/Horde/HordeHardSeparationSystem.cs`:
+  - added jam-mask build step (pressure snapshot + dense/slow check).
+  - if `JamOnly=1` and unit is not jammed, hard solver writes zero correction for that unit.
+  - added default hard config creation (enabled + jam-only defaults) when singleton is missing.
+- Updated `Assets/_Project/Scripts/Horde/HordeHardSeparationConfigAuthoring.cs`:
+  - exposed new jam-only fields in authoring and baker.
+
+### Why
+- Needed direct evidence for why soft separation can appear weak even with high params:
+  - neighbor cap saturation and processed-neighbor budget are now measurable.
+- Needed hard separation to apply only under congestion pressure without globally increasing per-frame hard-solver cost.
+
+### How to test
+1. Run the same scenario and read `[HordeTune]` lines.
+2. Verify new fields appear:
+   - `capReachedHits=...%`
+   - `avgProcessedNeighbors=...`
+   - `hardJamEnabled=...%`
+3. Confirm hard solver only affects jammed units when `JamOnly=1` (non-jam windows should remain mostly unchanged).
+4. Profiler watchlist:
+   - `GC Alloc = 0 B`
+   - no new sync-point spikes.

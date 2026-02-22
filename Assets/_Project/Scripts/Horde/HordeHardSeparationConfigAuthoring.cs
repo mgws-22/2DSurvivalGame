@@ -7,7 +7,12 @@ namespace Project.Horde
     [DisallowMultipleComponent]
     public sealed class HordeHardSeparationConfigAuthoring : MonoBehaviour
     {
-        [SerializeField] private bool _enabled;
+        [SerializeField] private bool _enabled = true;
+        [SerializeField] private bool _jamOnly = true;
+        [Min(0f)] [SerializeField] private float _jamPressureThreshold;
+        [Min(1)] [SerializeField] private int _iterationsJam = 3;
+        [Min(1)] [SerializeField] private int _maxNeighborsJam = 32;
+        [Min(0f)] [SerializeField] private float _maxPushPerFrameJam = 0.08f;
         [Min(0.001f)] [SerializeField] private float _radius = 0.1f;
         [Min(0.001f)] [SerializeField] private float _cellSize = 0.1f;
         [Min(1)] [SerializeField] private int _maxNeighbors = 28;
@@ -16,6 +21,11 @@ namespace Project.Horde
         [Min(0f)] [SerializeField] private float _slop = 0.001f;
 
         public bool Enabled => _enabled;
+        public bool JamOnly => _jamOnly;
+        public float JamPressureThreshold => _jamPressureThreshold;
+        public int IterationsJam => _iterationsJam;
+        public int MaxNeighborsJam => _maxNeighborsJam;
+        public float MaxPushPerFrameJam => _maxPushPerFrameJam;
         public float Radius => _radius;
         public float CellSize => _cellSize;
         public int MaxNeighbors => _maxNeighbors;
@@ -32,6 +42,11 @@ namespace Project.Horde
             AddComponent(entity, new HordeHardSeparationConfig
             {
                 Enabled = authoring.Enabled ? (byte)1 : (byte)0,
+                JamOnly = authoring.JamOnly ? (byte)1 : (byte)0,
+                JamPressureThreshold = math.max(0f, authoring.JamPressureThreshold),
+                IterationsJam = math.max(1, authoring.IterationsJam),
+                MaxNeighborsJam = math.max(1, authoring.MaxNeighborsJam),
+                MaxPushPerFrameJam = math.max(0f, authoring.MaxPushPerFrameJam),
                 Radius = math.max(0.001f, authoring.Radius),
                 CellSize = math.max(0.001f, authoring.CellSize),
                 MaxNeighbors = math.max(1, authoring.MaxNeighbors),

@@ -25,13 +25,18 @@ Provide low-overhead runtime tuning metrics (sampled overlap and jam rates) so c
      - sampled local pressure is above `BackpressureThreshold`, and
      - sampled displacement speed between metric ticks is below `moveSpeed * 0.2`.
 8. Collects observed speed statistics from sampled displacement using per-thread counters and a fixed 32-bin histogram (`0..2 units/s`) for percentile approximation.
-9. Logs one `[HordeTune]` line per metrics tick in Editor/Development builds:
+9. Collects solver-limit diagnostics from sampled neighbor scan:
+   - `capReachedHits%`: sampled units that hit `MaxNeighbors` cap.
+   - `avgProcessedNeighbors`: average processed neighbors per sampled unit.
+   - `hardJamEnabled%`: sampled units matching hard-jam condition (`localPressure > threshold` or `dense && slow`).
+10. Logs one `[HordeTune]` line per metrics tick in Editor/Development builds:
    - `logIntervalSeconds` for sampling window length
    - `simDt` for current simulation frame dt
    - overlap/jam percentages
    - speed stats (`avg/p50/p90/min/max`)
    - average speed fraction (`observedSpeed / moveSpeed`)
    - backpressure activity (`active%`, `avgScale`, `minScale`)
+   - solver-limit diagnostics (`capReachedHits%`, `avgProcessedNeighbors`, `hardJamEnabled%`)
    - per-frame cap estimates (`sepCapFrame`, `pressureCapFrame`) plus raw pressure/separation config values.
 
 ## Invariants

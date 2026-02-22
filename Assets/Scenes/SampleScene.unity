@@ -449,7 +449,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Project.Horde.HordeHardSeparationConfigAuthoring
   _enabled: 1
-  _radius: 0.1
+  _radius: 0.2
   _cellSize: 0.1
   _maxNeighbors: 28
   _iterations: 2

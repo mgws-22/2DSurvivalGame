@@ -61,6 +61,11 @@ namespace Project.Horde
     public struct HordeHardSeparationConfig : IComponentData
     {
         public byte Enabled;
+        public byte JamOnly;
+        public float JamPressureThreshold;
+        public int IterationsJam;
+        public int MaxNeighborsJam;
+        public float MaxPushPerFrameJam;
         public float Radius;
         public float CellSize;
         public int MaxNeighbors;
@@ -107,6 +112,9 @@ namespace Project.Horde
         public int Sampled;
         public int OverlapHits;
         public int JamHits;
+        public int HardJamEnabledHits;
+        public int CapReachedHits;
+        public int ProcessedNeighborsSum;
         public int SpeedSamples;
         public int BackpressureActiveHits;
         public float Dt;

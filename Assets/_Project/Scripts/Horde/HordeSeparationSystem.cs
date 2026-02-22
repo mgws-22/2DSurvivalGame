@@ -47,7 +47,7 @@ namespace Project.Horde
                 state.EntityManager.SetComponentData(configEntity, new HordeSeparationConfig
                 {
                     // Viktigt: detta måste matcha din sprite/world scale (halva diametern)
-                    Radius = 0.10f,
+                    Radius = 0.20f,
 
                     CellSizeFactor = 1.25f,
                     InfluenceRadiusFactor = 5.00f, // tuning: widen local neighbor awareness to reduce high overlap
