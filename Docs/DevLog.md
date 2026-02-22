@@ -1099,6 +1099,50 @@
 3. Check if overlap in medium-density windows (14.3%/28.6%/42.9%) trends lower.
 4. Verify no new sync points and `GC Alloc = 0 B` in gameplay.
 
+## 2026-02-21 - Tuning iteration: pre-jam backpressure still active + normalize ineffective separation defaults
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`:
+  - `BackpressureThreshold: 5.5 -> 6.5`
+  - `BackpressureK: 0.15 -> 0.10`
+- Updated `Assets/_Project/Scripts/Horde/HordeSeparationSystem.cs`:
+  - `CellSizeFactor: 1.55 -> 1.25`
+  - `InfluenceRadiusFactor: 3.00 -> 2.00`
+  - `SeparationStrength: 5.15 -> 1.00`
+  - `Iterations: 3 -> 2`
+
+### Why
+- In `jam=0%` windows, backpressure still activated (`active=42.9%`) and reduced `avgScale` to `0.92`, so trigger remained too early.
+- Separation defaults had values outside effective ranges (`SeparationStrength > 1` saturates and `Iterations > 2` is clamped), creating tuning noise without real effect.
+- This pass delays and softens backpressure while normalizing separation defaults to actually applied ranges.
+
+### How to test
+1. Re-run same stress scenario and inspect non-jam windows (`jam=0%`).
+2. Confirm backpressure active% is lower and `avgScale` stays nearer `1.0` before true congestion.
+3. Confirm overlap in medium-density windows does not regress.
+4. Verify no new sync points and `GC Alloc = 0 B` in gameplay.
+
+## 2026-02-21 - Tuning iteration: sink escalation mitigation (earlier pressure + high-pressure backpressure split)
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`:
+  - `TargetUnitsPerCell: 2.0 -> 1.8`
+  - `SpeedFractionCap: 0.30 -> 0.35`
+  - `BackpressureThreshold: 6.5 -> 7.0`
+  - `BackpressureK: 0.10 -> 0.20`
+
+### Why
+- Run still escalated from medium overlap into extreme sink jam (`overlap/jam` climbing to `100%/100%`).
+- Open windows remained healthy (`backpressure active=0%`), so we can safely increase macro relief and reserve stronger braking for higher pressure only.
+- Lower target density engages pressure earlier; higher speed cap gives pressure more usable movement budget.
+- Raising threshold while increasing `K` sharpens high-pressure braking without reintroducing broad early slowdown.
+
+### How to test
+1. Re-run same sink-stress scenario and compare trend windows over time.
+2. Confirm open windows still keep `backpressure active` near `0..5%`.
+3. Check if overlap/jam escalation starts later and peaks lower than the previous run.
+4. Verify no new sync points and `GC Alloc = 0 B` in gameplay.
+
 ## 2026-02-21 - Tuning iteration: sink-jam mitigation pass 2 (threshold split + stronger soft push)
 
 ### What changed

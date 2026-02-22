@@ -30,8 +30,8 @@ namespace Project.Map
         {
             return new MapConfig
             {
-                width = 20,
-                height = 20,
+                width = 200,
+                height = 200,
                 seed = 12345,
                 tileSize = 1f,
                 noiseScale = 0.05f,

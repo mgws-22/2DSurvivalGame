@@ -48,23 +48,23 @@ namespace Project.Horde
                     Enabled = 1,
 
                     // Pressure aktiveras tidigt nog för att motverka jam vid punktmål
-                    TargetUnitsPerCell = 2.0f,
+                    TargetUnitsPerCell = 1.8f,
 
                     // Mycket lägre än 10: pressure ska inte kännas som en separat motor
-                    PressureStrength = 3f,
+                    PressureStrength = 10f,
 
                     // Sätt högt så att SpeedFractionCap blir den verkliga begränsningen
                     // (då blir beteendet mer förutsägbart)
                     MaxPushPerFrame = 10.0f,
 
                     // Pressure får bara använda en del av moveSpeed*dt-budgeten
-                    SpeedFractionCap = 0.30f,
+                    SpeedFractionCap = 0.35f,
 
                     // Tuning rule: keep free-flow speed at 1.0 until pressure exceeds threshold.
-                    BackpressureThreshold = 5.5f,
-                    MinSpeedFactor = 0.30f,
-                    BackpressureK = 0.15f,
-                    BackpressureMaxFactor = 1.0f,
+                    BackpressureThreshold = 6.5f,
+                    MinSpeedFactor = 0.10f,
+                    BackpressureK = 0.2f,
+                    BackpressureMaxFactor = 22.0f,
 
                     // Lägre för att undvika "väggmagnetism"
                     BlockedCellPenalty = 3.0f,
@@ -145,13 +145,13 @@ namespace Project.Horde
             bool changedDefaults = false;
             if (config.BackpressureThreshold <= 0f)
             {
-                config.BackpressureThreshold = 5.5f;
+                config.BackpressureThreshold = 7.0f;
                 changedDefaults = true;
             }
 
             if (config.BackpressureK <= 0f)
             {
-                config.BackpressureK = 0.15f;
+                config.BackpressureK = 0.20f;
                 changedDefaults = true;
             }
 
