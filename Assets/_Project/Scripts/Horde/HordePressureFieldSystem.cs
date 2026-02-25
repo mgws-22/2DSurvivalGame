@@ -89,7 +89,6 @@ namespace Project.Horde
                     s_loggedMissingPressureConfigCreatedOnce = true;
                 }
 #endif
-                configQuery.Dispose();
                 return;
             }
 
@@ -112,7 +111,6 @@ namespace Project.Horde
                 }
             }
 
-            configQuery.Dispose();
         }
 
         private static HordePressureConfig CreateDefaultPressureConfig()

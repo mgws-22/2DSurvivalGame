@@ -44,6 +44,7 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
 - `HordePressureConfig` singleton is guaranteed at runtime:
   - preferred source: baked `HordePressureConfigAuthoring`
   - fallback: `HordePressureFieldSystem.OnCreate` creates one default singleton if missing
+  - fallback singleton query is created via `GetEntityQuery()` and is system-owned (not manually disposed)
 - No per-frame managed allocations in hot path.
 - Pressure field is always aligned to the same expanded grid as flow steering.
 - `MaxPushPerFrame` config is interpreted as units/second and converted to per-frame budget with `dt`.

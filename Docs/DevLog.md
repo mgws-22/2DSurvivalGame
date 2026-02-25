@@ -1685,3 +1685,17 @@
 3. Open `Window > Entities > Hierarchy`, select `Default World`, search `HordePressureConfig`, and verify exactly one entity exists.
 4. Verify values match the authoring component if present; otherwise verify defaults were created and (Editor/Development) a one-shot log appears.
 5. Confirm horde movement still runs and `GC Alloc = 0 B` in gameplay loop.
+
+## 2026-02-25 - Fix HordePressureConfig fallback query dispose crash
+
+### What changed
+- Fixed `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs` startup helper `EnsurePressureConfigSingleton(...)` to stop calling `Dispose()` on an `EntityQuery` created via `state.GetEntityQuery(...)`.
+
+### Why
+- In Entities 1.x, queries returned by `GetEntityQuery()` are owned by the system and must not be manually disposed.
+- Manual disposal caused `InvalidOperationException` during `HordePressureFieldSystem.OnCreate`, which also triggered follow-on `UpdateAfter` ordering warnings because the system failed to initialize.
+
+### How to test
+1. Enter Play Mode.
+2. Confirm no `EntityQuery cannot be disposed` exception appears.
+3. Confirm the previous `Ignoring invalid [UpdateAfterAttribute] ... targeting Project.Horde.HordePressureFieldSystem` warnings no longer appear (or are greatly reduced if another startup error exists).
