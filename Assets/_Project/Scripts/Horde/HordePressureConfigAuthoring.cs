@@ -23,6 +23,7 @@ namespace Project.Horde
         [Min(0f)] [SerializeField] private float _wallNearDistanceCells = 1.25f;
         [Min(0f)] [SerializeField] private float _denseUnitsPerCellThreshold = 5.0f;
         [SerializeField] private bool _enableWallTangentDriftDebug;
+        [SerializeField] private bool _debugForceTangent;
 
         [Header("Backpressure")]
         [Min(0f)] [SerializeField] private float _backpressureThreshold = 10.0f;
@@ -48,6 +49,7 @@ namespace Project.Horde
         public float WallNearDistanceCells => _wallNearDistanceCells;
         public float DenseUnitsPerCellThreshold => _denseUnitsPerCellThreshold;
         public bool EnableWallTangentDriftDebug => _enableWallTangentDriftDebug;
+        public bool DebugForceTangent => _debugForceTangent;
         public float BackpressureThreshold => _backpressureThreshold;
         public float MinSpeedFactor => _minSpeedFactor;
         public float BackpressureK => _backpressureK;
@@ -84,7 +86,8 @@ namespace Project.Horde
                 FieldUpdateIntervalFrames = math.max(1, authoring.FieldUpdateIntervalFrames),
                 BlurPasses = math.clamp(authoring.BlurPasses, 0, 2),
                 DisablePairwiseSeparationWhenPressureEnabled = authoring.DisablePairwiseSeparationWhenPressureEnabled ? (byte)1 : (byte)0,
-                EnableWallTangentDriftDebug = authoring.EnableWallTangentDriftDebug ? (byte)1 : (byte)0
+                EnableWallTangentDriftDebug = authoring.EnableWallTangentDriftDebug ? (byte)1 : (byte)0,
+                DebugForceTangent = authoring.DebugForceTangent ? (byte)1 : (byte)0
             });
         }
     }

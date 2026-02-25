@@ -1699,3 +1699,30 @@
 1. Enter Play Mode.
 2. Confirm no `EntityQuery cannot be disposed` exception appears.
 3. Confirm the previous `Ignoring invalid [UpdateAfterAttribute] ... targeting Project.Horde.HordePressureFieldSystem` warnings no longer appear (or are greatly reduced if another startup error exists).
+
+## 2026-02-25 - Horde pressure now applies after backpressure + debug counters/force mode
+
+### What changed
+- Updated horde system ordering so `HordePressureFieldSystem` runs after `HordeBackpressureSystem` (pressure/tangent displacement is no longer overwritten by backpressure integration in the same frame).
+- Extended `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs` debug instrumentation (debug flag gated, throttled):
+  - `eligible` (`wallNear && densityHigh`)
+  - `pressureApplied` (`pressureDelta > eps`)
+  - `tangentApplied` (`tangentDelta > eps`)
+  - `densityValid`
+  - `invalidWall`
+- Added `DebugForceTangent` to `HordePressureConfig` (and `HordePressureConfigAuthoring`) as a debug-only proof mode that applies a small tangent delta to the first few zombies when debug is enabled.
+- Restored/fixed `CreateDefaultPressureConfig()` baseline values in `HordePressureFieldSystem` (the local file had drifted/corrupted defaults during previous edits).
+
+### Why
+- Pressure was running before `HordeBackpressureSystem`, which also writes `LocalTransform`, so pressure movement could be overwritten and appear to do nothing.
+- Extra counters make it clear whether pressure/tangent paths are actually producing deltas and whether wall/density gating is failing.
+- `DebugForceTangent` gives a deterministic proof path to confirm the pressure system's `LocalTransform` writes reach the final motion chain.
+
+### How to test
+1. Enter Play Mode with a dense crowd.
+2. Set `EnableWallTangentDriftDebug = 1` on `HordePressureConfig` and watch the throttled log.
+3. Verify `pressureApplied > 0` when `Enabled = 1` and `MaxPushPerFrame > 0`.
+4. Set `MaxPushPerFrame = 0` and verify `pressureApplied = 0` in later logs.
+5. Set `Enabled = 0` and verify pressure/tangent effects disappear (and pressure system returns early).
+6. If `eligible = 0`, set `WallNearDistanceCells` large and `DenseUnitsPerCellThreshold = 0`; if still zero, set `DebugForceTangent = 1` and verify `tangentApplied > 0`.
+7. Confirm `GC Alloc = 0 B` in gameplay loop.

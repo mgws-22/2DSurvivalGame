@@ -12,6 +12,7 @@ namespace Project.Horde
 {
     [UpdateInGroup(typeof(SimulationSystemGroup))]
     [UpdateAfter(typeof(ZombieSteeringSystem))]
+    [UpdateAfter(typeof(HordeBackpressureSystem))]
     [UpdateBefore(typeof(HordeSeparationSystem))]
     [UpdateBefore(typeof(HordeHardSeparationSystem))]
     public partial struct HordePressureFieldSystem : ISystem
@@ -19,13 +20,19 @@ namespace Project.Horde
         private const float Epsilon = 1e-6f;
         private const float Diagonal = 0.70710677f;
         private const int DebugLogIntervalFrames = 120;
+        private const int DebugCounterCount = 5;
+        private const int DebugCounterEligible = 0;
+        private const int DebugCounterPressureApplied = 1;
+        private const int DebugCounterTangentApplied = 2;
+        private const int DebugCounterDensityValid = 3;
+        private const int DebugCounterInvalidWallSample = 4;
 
         private NativeArray<int> _density;
         private NativeArray<int> _densityPerThread;
         private int _workerCount;
         private NativeArray<float> _pressureA;
         private NativeArray<float> _pressureB;
-        private NativeArray<int> _wallTangentEligiblePerThread;
+        private NativeArray<int> _debugCountersPerThread;
         private int _cellCount;
         private int _frameIndex;
         private byte _activePressureBuffer;
@@ -65,7 +72,7 @@ namespace Project.Horde
 
             _pressureLookup = state.GetBufferLookup<PressureCell>(false);
             int maxWorkerCount = math.max(1, JobsUtility.MaxJobThreadCount);
-            _wallTangentEligiblePerThread = new NativeArray<int>(maxWorkerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _debugCountersPerThread = new NativeArray<int>(maxWorkerCount * DebugCounterCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _lastApplyPressureHandle = default;
             _hasLastApplyPressureHandle = 0;
             _lastWallTangentDebugLogFrame = -DebugLogIntervalFrames;
@@ -118,25 +125,36 @@ namespace Project.Horde
             return new HordePressureConfig
             {
                 Enabled = 1,
-                TargetUnitsPerCell = 1.5f,
-                PressureStrength = 1.25f,
-                MaxPushPerFrame = 0f,
-                SpeedFractionCap = 0.45f,
-                PressureParallelScale = 0.35f,
-                PressurePerpScale = 1.25f,
-                WallTangentStrength = 0.75f,
-                WallTangentMaxPushPerFrame = 1.25f,
-                WallNearDistanceCells = 1.25f,
-                DenseUnitsPerCellThreshold = 0.01f,
-                BackpressureThreshold = 10.0f,
-                MinSpeedFactor = 0.01f,
-                BackpressureK = 0.5f,
-                BackpressureMaxFactor = 22.0f,
+                TargetUnitsPerCell = 1.2f,
+
+                PressureStrength = 13.0f,
+                MaxPushPerFrame = 12.0f,
+                SpeedFractionCap = 1.0f,
+
+                PressureParallelScale = 0.05f,
+                PressurePerpScale = 3.0f,
+
+                WallTangentStrength = 6.0f,
+                WallTangentMaxPushPerFrame = 6.0f,
+                WallNearDistanceCells = 6.0f,
+                DenseUnitsPerCellThreshold = 0.5f,
+
+                // Backpressure: keep flow from endlessly feeding the queue
+                BackpressureThreshold = 6.0f,
+                MinSpeedFactor = 0.20f,
+                BackpressureK = 0.35f,
+                BackpressureMaxFactor = 1.0f,
+
                 BlockedCellPenalty = 6.0f,
-                FieldUpdateIntervalFrames = 2,
+                FieldUpdateIntervalFrames = 1,
                 BlurPasses = 1,
+
                 DisablePairwiseSeparationWhenPressureEnabled = 0,
-                EnableWallTangentDriftDebug = 1
+
+                // Turn on temporarily to confirm gating triggers
+                EnableWallTangentDriftDebug = 1,
+
+                DebugForceTangent = 0
             };
         }
 
@@ -162,9 +180,9 @@ namespace Project.Horde
                 _pressureB.Dispose();
             }
 
-            if (_wallTangentEligiblePerThread.IsCreated)
+            if (_debugCountersPerThread.IsCreated)
             {
-                _wallTangentEligiblePerThread.Dispose();
+                _debugCountersPerThread.Dispose();
             }
 
             _cellCount = 0;
@@ -194,61 +212,61 @@ namespace Project.Horde
 
             HordePressureConfig config = SystemAPI.GetSingleton<HordePressureConfig>();
             bool changedDefaults = false;
-            if (config.BackpressureThreshold <= 0f)
+            if (config.BackpressureThreshold < 0f)
             {
                 config.BackpressureThreshold = 7.0f;
                 changedDefaults = true;
             }
 
-            if (config.BackpressureK <= 0f)
+            if (config.BackpressureK < 0f)
             {
                 config.BackpressureK = 0.20f;
                 changedDefaults = true;
             }
 
-            if (config.MinSpeedFactor <= 0f)
+            if (config.MinSpeedFactor < 0f)
             {
                 config.MinSpeedFactor = 0.30f;
                 changedDefaults = true;
             }
 
-            if (config.BackpressureMaxFactor <= 0f)
+            if (config.BackpressureMaxFactor < 0f)
             {
                 config.BackpressureMaxFactor = 1.0f;
                 changedDefaults = true;
             }
 
-            if (config.PressureParallelScale <= 0f)
+            if (config.PressureParallelScale < 0f)
             {
                 config.PressureParallelScale = 0.35f;
                 changedDefaults = true;
             }
 
-            if (config.PressurePerpScale <= 0f)
+            if (config.PressurePerpScale < 0f)
             {
                 config.PressurePerpScale = 1.25f;
                 changedDefaults = true;
             }
 
-            if (config.WallTangentStrength <= 0f)
+            if (config.WallTangentStrength < 0f)
             {
                 config.WallTangentStrength = 0.75f;
                 changedDefaults = true;
             }
 
-            if (config.WallTangentMaxPushPerFrame <= 0f)
+            if (config.WallTangentMaxPushPerFrame < 0f)
             {
                 config.WallTangentMaxPushPerFrame = 1.25f;
                 changedDefaults = true;
             }
 
-            if (config.WallNearDistanceCells <= 0f)
+            if (config.WallNearDistanceCells < 0f)
             {
                 config.WallNearDistanceCells = 1.25f;
                 changedDefaults = true;
             }
 
-            if (config.DenseUnitsPerCellThreshold <= 0f)
+            if (config.DenseUnitsPerCellThreshold < 0f)
             {
                 config.DenseUnitsPerCellThreshold = 5.0f;
                 changedDefaults = true;
@@ -317,13 +335,14 @@ namespace Project.Horde
 #else
             bool wallTangentDebugEnabled = false;
 #endif
-            if (wallTangentDebugEnabled && _wallTangentEligiblePerThread.IsCreated)
+            bool debugForceTangentEnabled = wallTangentDebugEnabled && config.DebugForceTangent != 0;
+            if (wallTangentDebugEnabled && _debugCountersPerThread.IsCreated)
             {
                 ClearIntArrayJob clearWallTangentDebugJob = new ClearIntArrayJob
                 {
-                    Values = _wallTangentEligiblePerThread
+                    Values = _debugCountersPerThread
                 };
-                dependency = clearWallTangentDebugJob.Schedule(_wallTangentEligiblePerThread.Length, 32, dependency);
+                dependency = clearWallTangentDebugJob.Schedule(_debugCountersPerThread.Length, 32, dependency);
             }
             NativeArray<float> activePressure = _activePressureBuffer == 0 ? _pressureA : _pressureB;
 
@@ -436,7 +455,8 @@ namespace Project.Horde
                 CenterWorld = mapData.CenterWorld,
                 DeltaTime = deltaTime,
                 WallTangentDebugEnabled = wallTangentDebugEnabled ? (byte)1 : (byte)0,
-                DebugWallTangentEligiblePerThread = _wallTangentEligiblePerThread
+                DebugForceTangentEnabled = debugForceTangentEnabled ? (byte)1 : (byte)0,
+                DebugCountersPerThread = _debugCountersPerThread
             };
             JobHandle applyHandle = applyPressureJob.ScheduleParallel(dependency);
             state.Dependency = applyHandle;
@@ -464,16 +484,38 @@ namespace Project.Horde
             }
 
             _lastApplyPressureHandle.Complete();
-            int count = 0;
-            for (int i = 0; i < _wallTangentEligiblePerThread.Length; i++)
-            {
-                count += _wallTangentEligiblePerThread[i];
-            }
+            int eligible = SumDebugCounter(DebugCounterEligible);
+            int pressureApplied = SumDebugCounter(DebugCounterPressureApplied);
+            int tangentApplied = SumDebugCounter(DebugCounterTangentApplied);
+            int densityValid = SumDebugCounter(DebugCounterDensityValid);
+            int invalidWall = SumDebugCounter(DebugCounterInvalidWallSample);
 
             _lastWallTangentDebugLogFrame = _frameIndex;
             UnityEngine.Debug.Log(
-                "[HordePressure] WallTangentEligibleUnits=" + count +
+                "[HordePressure] eligible=" + eligible +
+                " pressureApplied=" + pressureApplied +
+                " tangentApplied=" + tangentApplied +
+                " densityValid=" + densityValid +
+                " invalidWall=" + invalidWall +
                 " frame=" + _frameIndex + ".");
+        }
+
+        private int SumDebugCounter(int counterIndex)
+        {
+            if (!_debugCountersPerThread.IsCreated || counterIndex < 0 || counterIndex >= DebugCounterCount)
+            {
+                return 0;
+            }
+
+            int workerCount = _debugCountersPerThread.Length / DebugCounterCount;
+            int sum = 0;
+            for (int i = 0; i < workerCount; i++)
+            {
+                int baseIndex = i * DebugCounterCount;
+                sum += _debugCountersPerThread[baseIndex + counterIndex];
+            }
+
+            return sum;
         }
 #endif
 
@@ -697,6 +739,15 @@ namespace Project.Horde
         [BurstCompile]
         private partial struct ApplyPressureJob : IJobEntity
         {
+            private const int DebugCounterCount = 5;
+            private const int DebugCounterEligible = 0;
+            private const int DebugCounterPressureApplied = 1;
+            private const int DebugCounterTangentApplied = 2;
+            private const int DebugCounterDensityValid = 3;
+            private const int DebugCounterInvalidWallSample = 4;
+            private const int DebugForceTangentFirstN = 32;
+            private const float DebugForceTangentDelta = 0.05f;
+
             [ReadOnly] public BlobAssetReference<FlowFieldBlob> Flow;
             [ReadOnly] public BlobAssetReference<WallFieldBlob> Wall;
             public byte HasWallField;
@@ -715,7 +766,8 @@ namespace Project.Horde
             public float2 CenterWorld;
             public float DeltaTime;
             public byte WallTangentDebugEnabled;
-            [NativeDisableParallelForRestriction] public NativeArray<int> DebugWallTangentEligiblePerThread;
+            public byte DebugForceTangentEnabled;
+            [NativeDisableParallelForRestriction] public NativeArray<int> DebugCountersPerThread;
             [NativeSetThreadIndex] public int ThreadIndex;
 
             private void Execute(
@@ -750,8 +802,9 @@ namespace Project.Horde
                     return;
                 }
 
+                bool debugForceTangent = WallTangentDebugEnabled != 0 && DebugForceTangentEnabled != 0 && entityIndex < DebugForceTangentFirstN;
                 float localPressure = Pressure[index];
-                if (localPressure <= Epsilon)
+                if (localPressure <= Epsilon && !debugForceTangent)
                 {
                     return;
                 }
@@ -782,6 +835,9 @@ namespace Project.Horde
                     return;
                 }
 
+                CountDebugCounter(DebugCounterDensityValid);
+                float localDensity = (index >= 0 && index < Density.Length) ? Density[index] : 0f;
+
                 float2 pressureDelta = float2.zero;
                 float2 direction = ResolvePressureDirection(cell, position, entityIndex, localPressure, ref flow);
                 float dirLenSq = math.lengthsq(direction);
@@ -801,19 +857,39 @@ namespace Project.Horde
                     }
                 }
 
-                float localDensity = (index >= 0 && index < Density.Length) ? Density[index] : 0f;
-                bool densityHigh = localDensity >= DenseUnitsPerCellThreshold;
+                bool densityHigh = debugForceTangent || localDensity >= DenseUnitsPerCellThreshold;
+                bool wallNear = false;
+                float2 wallNormal = float2.zero;
                 float2 tangentDelta = float2.zero;
+
                 if (densityHigh)
                 {
-                    float2 wallNormal;
-                    float wallDistCells;
-                    bool wallNear = TryGetWallNearData(position, out wallNormal, out wallDistCells) && wallDistCells <= WallNearDistanceCells;
-                    if (wallNear)
+                    if (debugForceTangent)
                     {
-                        CountWallTangentEligibleDebug();
-                        tangentDelta = ComputeWallTangentDelta(wallNormal, desiredDir);
+                        wallNear = true;
+                        CountDebugCounter(DebugCounterEligible);
+                        tangentDelta = ComputeDebugForceTangentDelta(effectiveCap);
                     }
+                    else
+                    {
+                        float wallDistCells;
+                        if (TryGetWallNearData(position, out wallNormal, out wallDistCells) && wallDistCells <= WallNearDistanceCells)
+                        {
+                            wallNear = true;
+                            CountDebugCounter(DebugCounterEligible);
+                            tangentDelta = ComputeWallTangentDelta(wallNormal, desiredDir);
+                        }
+                    }
+                }
+
+                if (math.lengthsq(pressureDelta) > Epsilon)
+                {
+                    CountDebugCounter(DebugCounterPressureApplied);
+                }
+
+                if (math.lengthsq(tangentDelta) > Epsilon)
+                {
+                    CountDebugCounter(DebugCounterTangentApplied);
                 }
 
                 float2 totalDelta = pressureDelta + tangentDelta;
@@ -835,6 +911,17 @@ namespace Project.Horde
                 }
 
                 transform.Position = new float3(candidate.x, candidate.y, transform.Position.z);
+            }
+
+            private float2 ComputeDebugForceTangentDelta(float effectiveCap)
+            {
+                if (effectiveCap <= 0f)
+                {
+                    return float2.zero;
+                }
+
+                float push = math.min(DebugForceTangentDelta, effectiveCap);
+                return new float2(0f, push);
             }
 
             private float2 ComputeWallTangentDelta(float2 wallNormal, float2 desiredDir)
@@ -872,15 +959,22 @@ namespace Project.Horde
                 return tangent * tangentPush;
             }
 
-            private void CountWallTangentEligibleDebug()
+            private void CountDebugCounter(int counterIndex)
             {
-                if (WallTangentDebugEnabled == 0 || DebugWallTangentEligiblePerThread.Length <= 0)
+                if (WallTangentDebugEnabled == 0 || DebugCountersPerThread.Length <= 0)
                 {
                     return;
                 }
 
-                int workerIndex = math.clamp(ThreadIndex - 1, 0, DebugWallTangentEligiblePerThread.Length - 1);
-                DebugWallTangentEligiblePerThread[workerIndex] = DebugWallTangentEligiblePerThread[workerIndex] + 1;
+                if (counterIndex < 0 || counterIndex >= DebugCounterCount)
+                {
+                    return;
+                }
+
+                int workerCount = DebugCountersPerThread.Length / DebugCounterCount;
+                int workerIndex = math.clamp(ThreadIndex - 1, 0, workerCount - 1);
+                int baseIndex = workerIndex * DebugCounterCount;
+                DebugCountersPerThread[baseIndex + counterIndex] = DebugCountersPerThread[baseIndex + counterIndex] + 1;
             }
 
             private float2 ResolveDesiredDirection(float2 goalIntentDirection, float2 velocity, float2 flowDirection)
@@ -920,6 +1014,7 @@ namespace Project.Horde
                 wallDistCells = float.MaxValue;
                 if (HasWallField == 0 || !Wall.IsCreated)
                 {
+                    CountDebugCounter(DebugCounterInvalidWallSample);
                     return false;
                 }
 
@@ -927,18 +1022,21 @@ namespace Project.Horde
                 int2 wallCell = WorldToWallGrid(worldPosition, ref wall);
                 if (!IsInWallBounds(wallCell, ref wall))
                 {
+                    CountDebugCounter(DebugCounterInvalidWallSample);
                     return false;
                 }
 
                 int wallIndex = wallCell.x + (wallCell.y * wall.Width);
                 if (wallIndex < 0 || wallIndex >= wall.Dist.Length || wallIndex >= wall.Dir.Length)
                 {
+                    CountDebugCounter(DebugCounterInvalidWallSample);
                     return false;
                 }
 
                 ushort dist = wall.Dist[wallIndex];
                 if (dist == ushort.MaxValue)
                 {
+                    CountDebugCounter(DebugCounterInvalidWallSample);
                     return false;
                 }
 
@@ -946,13 +1044,15 @@ namespace Project.Horde
                 byte dir = wall.Dir[wallIndex];
                 if (dir >= wall.DirLut.Length)
                 {
+                    CountDebugCounter(DebugCounterInvalidWallSample);
                     return false;
                 }
 
                 float2 n = wall.DirLut[dir];
                 float nLenSq = math.lengthsq(n);
-                if (nLenSq <= Epsilon)
+                if (nLenSq <= Epsilon || !math.isfinite(nLenSq))
                 {
+                    CountDebugCounter(DebugCounterInvalidWallSample);
                     return false;
                 }
 

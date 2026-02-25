@@ -163,7 +163,7 @@ namespace Project.Horde
 
     [BurstCompile]
     [UpdateInGroup(typeof(SimulationSystemGroup))]
-    [UpdateAfter(typeof(HordePressureFieldSystem))]
+    [UpdateAfter(typeof(ZombieSteeringSystem))]
     [UpdateBefore(typeof(HordeSeparationSystem))]
     [UpdateBefore(typeof(HordeHardSeparationSystem))]
     [UpdateBefore(typeof(WallRepulsionSystem))]

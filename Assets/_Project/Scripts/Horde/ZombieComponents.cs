@@ -105,6 +105,7 @@ namespace Project.Horde
         public int BlurPasses;
         public byte DisablePairwiseSeparationWhenPressureEnabled;
         public byte EnableWallTangentDriftDebug;
+        public byte DebugForceTangent;
     }
 
     public struct ZombieAccelerationConfig : IComponentData

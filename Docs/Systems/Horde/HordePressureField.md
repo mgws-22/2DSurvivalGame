@@ -34,8 +34,9 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
 13. Rejects pressure move if resulting position lands in a blocked expanded flow cell.
 
 ## Update Order
-- Runs after `ZombieSteeringSystem` (which now writes `ZombieGoalIntent` only).
-- Runs before `HordeBackpressureSystem` (which reads published `PressureCell` and applies scaled goal intent).
+- `ZombieSteeringSystem` writes `ZombieGoalIntent`.
+- `HordeBackpressureSystem` applies goal intent/backpressure to velocity + base integration.
+- `HordePressureFieldSystem` now runs **after** `HordeBackpressureSystem` so pressure/tangent displacement is not overwritten by backpressure integration.
 - Runs before `HordeSeparationSystem`, which runs before `HordeHardSeparationSystem`.
 - Runs before `WallRepulsionSystem`.
 - `WallRepulsionSystem` remains the final blocked-cell safety correction.
@@ -65,6 +66,7 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
   - `WallNearDistanceCells` (default `1.25`, wall-field cell distance)
   - `DenseUnitsPerCellThreshold` (default `5.0`)
   - `EnableWallTangentDriftDebug` (`0/1`, throttled log, debug builds only)
+  - `DebugForceTangent` (`0/1`, debug-only proof mode for tangent application on first few zombies)
 - Density accumulation is parallel and race-free without `unsafe` code by using per-thread bins plus a reduce pass.
 - Pressure push is bounded and cannot exceed configured speed fraction per frame.
 - Blocked-cell projection safety remains in wall repulsion, so units do not remain in blocked map cells.
@@ -78,6 +80,7 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
 - No structural entity changes and no manual sync points.
 - No `Complete()` sync points in normal gameplay; publish copy stays scheduled/jobified.
 - Optional debug logging is throttled (`120` frames) and only attempts to read the previous frame count when the job handle is already complete.
+- Debug counters are tracked in a persistent per-thread buffer (eligible / pressureApplied / tangentApplied / densityValid / invalidWall).
 - Pressure publish lookup is created in `OnCreate` and updated per frame (`.Update(ref state)`), avoiding per-frame lookup creation overhead.
 
 ## Verification
@@ -89,9 +92,11 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
    - units should spread laterally more
    - fewer ultra-tight single-file lines hugging the wall
    - movement remains smooth (no visible jitter increase)
-6. Optional debug: set `EnableWallTangentDriftDebug = 1` on the `HordePressureConfig` singleton and confirm a throttled log appears roughly every `120` frames with eligible unit count.
-7. Open `Window > Entities > Hierarchy`, select `Default World`, and search for `HordePressureConfig` to verify the singleton exists.
-8. Profiler watchlist:
+6. Optional debug: set `EnableWallTangentDriftDebug = 1` and confirm a throttled log appears roughly every `120` frames:
+   - `[HordePressure] eligible=E pressureApplied=P tangentApplied=T densityValid=D invalidWall=W frame=F`
+7. If `eligible` remains `0`, set `DebugForceTangent = 1` to force tangent application for the first few zombies and verify `tangentApplied > 0`.
+8. Open `Window > Entities > Hierarchy`, select `Default World`, and search for `HordePressureConfig` to verify the singleton exists.
+9. Profiler watchlist:
    - `GC Alloc` stays `0 B`
    - no unexpected `Complete()` sync spikes
    - main thread not regressed versus pairwise-only baseline
