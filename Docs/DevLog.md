@@ -1606,3 +1606,26 @@
 3. Enter Play Mode and verify enemies walk into it and jam (no reroute around the building).
 4. Force enemies onto the wall footprint and verify they are projected out and cannot remain inside.
 5. Profile and verify `GC Alloc = 0 B` in the play loop with no new safety exceptions.
+
+## 2026-02-25 - Runtime map upscaling (post-generate expansion)
+
+### What changed
+- Updated `Assets/_Project/Scripts/Map/MapGenerationController.cs` to support runtime map upscaling with a serialized scale factor (default `3`).
+- The logical map is still generated exactly as before via `MapGenerator.Generate(...)`.
+- After generation, the produced `MapData` is expanded so each logical cell becomes a `k x k` runtime block.
+- The expanded `MapData` is now used for both tilemap rendering and `MapEcsBridge.Sync(...)`.
+- `CenterOpenRadius` and gate centers are scaled to runtime cell space.
+- `SpawnMargin` remains unscaled intentionally (same cell count) to preserve the current spawn ring behavior.
+- Added a debug-only one-shot log (Editor/Development) showing logical dims vs runtime dims and the scale factor.
+- Updated `Assets/_Project/Scripts/Map/MapEcsBridge.cs` comments/locals to document runtime-upscaled width/height usage and unscaled spawn-margin intent.
+
+### Why
+- This makes the world `3x` larger in each axis while keeping the same `tileSize`, without changing the logical generator behavior or map shape.
+- ECS systems that depend on `MapRuntimeData` (including `ZombieSpawnSystem`) automatically use the expanded runtime dimensions.
+
+### How to test
+1. Open `Assets/Scenes/SampleScene.unity` and enter Play Mode.
+2. Verify the visible map is larger than before (same tile size, more cells).
+3. In Console (Editor/Development), verify one log line reports logical dims, runtime dims, and `scaleFactor=3`.
+4. Verify zombies spawn around the expanded play area using the same `spawnMargin` cell count.
+5. Verify flow/wall fields rebuild for the expanded map and `GC Alloc = 0 B` in gameplay loop.

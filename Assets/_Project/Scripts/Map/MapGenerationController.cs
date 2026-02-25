@@ -9,6 +9,8 @@ namespace Project.Map
         [SerializeField] private MapConfig _config = MapConfig.CreateDefault();
         [SerializeField] private MapTilemapRenderer _tilemapRenderer;
         [SerializeField] private bool _generateOnAwake = true;
+        [Header("Runtime Upscaling")]
+        [SerializeField, Min(1)] private int _mapScaleFactor = 3;
 
         [Header("Debug Gizmos")]
         [SerializeField] private bool _drawSpawnBounds = true;
@@ -18,6 +20,9 @@ namespace Project.Map
         [SerializeField] private Color _gateColor = Color.cyan;
 
         private bool _pendingMapEcsSync;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private bool _loggedRuntimeScaleInfo;
+#endif
 
         public MapData CurrentMap { get; private set; }
 
@@ -62,7 +67,12 @@ namespace Project.Map
             _tilemapRenderer.SetCellSize(_config.tileSize);
 
             float2 origin = new float2(transform.position.x, transform.position.y);
-            CurrentMap = MapGenerator.Generate(_config, origin);
+            int runtimeScaleFactor = Mathf.Max(1, _mapScaleFactor);
+            MapData logicalMap = MapGenerator.Generate(_config, origin);
+            CurrentMap = ExpandRuntimeMap(logicalMap, runtimeScaleFactor);
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            LogRuntimeScaleInfoOnce(logicalMap, CurrentMap, runtimeScaleFactor);
+#endif
             _pendingMapEcsSync = !MapEcsBridge.Sync(CurrentMap);
             _tilemapRenderer.Render(CurrentMap);
         }
@@ -95,6 +105,7 @@ namespace Project.Map
         private void OnDrawGizmosSelected()
         {
             MapConfig validated = _config.GetValidated();
+            int runtimeScaleFactor = Mathf.Max(1, _mapScaleFactor);
 
             Bounds playBounds;
             Bounds spawnBounds;
@@ -106,7 +117,9 @@ namespace Project.Map
             else
             {
                 float2 origin = new float2(transform.position.x, transform.position.y);
-                float2 playSize = new float2(validated.width * validated.tileSize, validated.height * validated.tileSize);
+                float2 playSize = new float2(
+                    validated.width * runtimeScaleFactor * validated.tileSize,
+                    validated.height * runtimeScaleFactor * validated.tileSize);
                 float2 playCenter = origin + (playSize * 0.5f);
                 playBounds = new Bounds(new Vector3(playCenter.x, playCenter.y, 0f), new Vector3(playSize.x, playSize.y, 0.01f));
 
@@ -127,7 +140,7 @@ namespace Project.Map
             if (_drawGateGizmos && CurrentMap != null)
             {
                 Gizmos.color = _gateColor;
-                float gateRadiusWorld = math.max(0.1f, validated.gateRadius * validated.tileSize);
+                float gateRadiusWorld = math.max(0.1f, validated.gateRadius * runtimeScaleFactor * validated.tileSize);
                 for (int i = 0; i < CurrentMap.GateCount; i++)
                 {
                     float2 gateCenter = CurrentMap.GridToWorld(CurrentMap.GetGateCenter(i));
@@ -135,5 +148,80 @@ namespace Project.Map
                 }
             }
         }
+
+        private static MapData ExpandRuntimeMap(MapData logicalMap, int scaleFactor)
+        {
+            if (logicalMap == null || scaleFactor <= 1)
+            {
+                return logicalMap;
+            }
+
+            int logicalWidth = logicalMap.Width;
+            int logicalHeight = logicalMap.Height;
+            int runtimeWidth = logicalWidth * scaleFactor;
+            int runtimeHeight = logicalHeight * scaleFactor;
+
+            bool[] runtimeWalkable = new bool[runtimeWidth * runtimeHeight];
+
+            for (int y = 0; y < logicalHeight; y++)
+            {
+                int runtimeBaseY = y * scaleFactor;
+                for (int x = 0; x < logicalWidth; x++)
+                {
+                    bool isWalkable = logicalMap.IsWalkable(x, y);
+                    int runtimeBaseX = x * scaleFactor;
+
+                    for (int dy = 0; dy < scaleFactor; dy++)
+                    {
+                        int runtimeRowOffset = (runtimeBaseY + dy) * runtimeWidth;
+                        int runtimeIndex = runtimeRowOffset + runtimeBaseX;
+                        for (int dx = 0; dx < scaleFactor; dx++)
+                        {
+                            runtimeWalkable[runtimeIndex + dx] = isWalkable;
+                        }
+                    }
+                }
+            }
+
+            int gateCount = logicalMap.GateCount;
+            int2[] runtimeGateCenters = new int2[gateCount];
+            int gateCenterOffset = (scaleFactor - 1) / 2;
+            for (int i = 0; i < gateCount; i++)
+            {
+                int2 logicalGate = logicalMap.GetGateCenter(i);
+                runtimeGateCenters[i] = new int2(
+                    (logicalGate.x * scaleFactor) + gateCenterOffset,
+                    (logicalGate.y * scaleFactor) + gateCenterOffset);
+            }
+
+            MapData runtimeMap = new MapData(
+                runtimeWidth,
+                runtimeHeight,
+                logicalMap.TileSize,
+                logicalMap.SpawnMargin, // Intentionally not scaled; scale here later if wider spawn ring is desired.
+                logicalMap.CenterOpenRadius * scaleFactor,
+                logicalMap.WorldOrigin,
+                runtimeGateCenters);
+
+            runtimeMap.FillFromWalkable(runtimeWalkable);
+            return runtimeMap;
+        }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private void LogRuntimeScaleInfoOnce(MapData logicalMap, MapData runtimeMap, int scaleFactor)
+        {
+            if (_loggedRuntimeScaleInfo || logicalMap == null || runtimeMap == null)
+            {
+                return;
+            }
+
+            _loggedRuntimeScaleInfo = true;
+            UnityEngine.Debug.Log(
+                "Map runtime upscale: logical="
+                + logicalMap.Width + "x" + logicalMap.Height
+                + ", runtime=" + runtimeMap.Width + "x" + runtimeMap.Height
+                + ", scaleFactor=" + scaleFactor + ".");
+        }
+#endif
     }
 }

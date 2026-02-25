@@ -78,14 +78,14 @@ namespace Project.Horde
                     // Position correction caps (treat as "max correction per iter")
                     MaxPushPerFrameJam = 0.02f,
 
-                    Radius = 0.20f,
-                    CellSize = 0.50f,          // ~= (2*Radius)*1.25 = 0.4*1.25 = 0.5
+                    Radius = 0.60f,
+                    CellSize = 1.20f,          // ~= (2*Radius)*1.25 = 0.4*1.25 = 0.5
 
                     MaxNeighbors = 28,
                     Iterations = 2,
 
-                    MaxCorrectionPerIter = 0.02f,
-                    Slop = 0.002f
+                    MaxCorrectionPerIter = 0.2f,
+                    Slop = 0.02f
                 });
             }
 

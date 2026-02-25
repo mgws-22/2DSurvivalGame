@@ -58,9 +58,9 @@ namespace Project.Horde
                     SpeedFractionCap = 0.45f,
 
                     // Backpressure is applied as: raw = 1/(1+K*excess), clamped :contentReference[oaicite:5]{index=5}
-                    BackpressureThreshold = 7.0f,
-                    MinSpeedFactor = 0.05f,
-                    BackpressureK = 2.5f,
+                    BackpressureThreshold = 10.0f,
+                    MinSpeedFactor = 0.15f,
+                    BackpressureK = 0.5f,
                     BackpressureMaxFactor = 22.0f,
 
                     // Enough to avoid drifting into blocked, but not “wall magnetism”

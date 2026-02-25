@@ -14,13 +14,13 @@ namespace Project.Horde
         [Range(0f, 1f)] [SerializeField] private float _slowSpeedFraction = 0.2f;
         [Min(1)] [SerializeField] private int _iterationsJam = 3;
         [Min(1)] [SerializeField] private int _maxNeighborsJam = 32;
-        [Min(0f)] [SerializeField] private float _maxPushPerFrameJam = 0.08f;
-        [Min(0.001f)] [SerializeField] private float _radius = 0.4f;
-        [Min(0.001f)] [SerializeField] private float _cellSize = 0.1f;
+        [Min(0f)] [SerializeField] private float _maxPushPerFrameJam = 0.8f;
+        [Min(0.001f)] [SerializeField] private float _radius = 0.6f;
+        [Min(0.001f)] [SerializeField] private float _cellSize = 0.6f;
         [Min(1)] [SerializeField] private int _maxNeighbors = 28;
         [Min(1)] [SerializeField] private int _iterations = 2;
-        [Min(0f)] [SerializeField] private float _maxCorrectionPerIter = 0.08f;
-        [Min(0f)] [SerializeField] private float _slop = 0.001f;
+        [Min(0f)] [SerializeField] private float _maxCorrectionPerIter = 0.8f;
+        [Min(0f)] [SerializeField] private float _slop = 0.1f;
 
         public bool Enabled => _enabled;
         public bool JamOnly => _jamOnly;

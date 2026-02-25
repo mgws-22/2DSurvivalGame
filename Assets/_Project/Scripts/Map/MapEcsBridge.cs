@@ -75,13 +75,18 @@ namespace Project.Map
 
             query.Dispose();
 
+            int runtimeWidth = mapData.Width;
+            int runtimeHeight = mapData.Height;
+
             float2 centerWorld = mapData.WorldOrigin +
-                (new float2(mapData.Width * mapData.TileSize, mapData.Height * mapData.TileSize) * 0.5f);
+                (new float2(runtimeWidth * mapData.TileSize, runtimeHeight * mapData.TileSize) * 0.5f);
 
             MapRuntimeData runtimeData = new MapRuntimeData
             {
-                Width = mapData.Width,
-                Height = mapData.Height,
+                Width = runtimeWidth,
+                Height = runtimeHeight,
+                // Spawn margin is intentionally left unscaled for runtime-upscaled maps.
+                // If a thicker world-space spawn ring is desired, scale it in the map upscaling step.
                 SpawnMargin = mapData.SpawnMargin,
                 CenterOpenRadius = mapData.CenterOpenRadius,
                 TileSize = mapData.TileSize,

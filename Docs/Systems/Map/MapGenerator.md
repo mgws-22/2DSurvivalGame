@@ -22,6 +22,7 @@ Target shape is a dense labyrinth: mostly cliffs, narrow winding corridors.
   - ScriptableObject mapping cliff mask (`0-15`) to cliff `TileBase` plus a ground tile.
 - `MapGenerationController` (`Assets/_Project/Scripts/Map/MapGenerationController.cs`)
   - Runtime bootstrap, generation trigger, gizmos, context-menu regenerate.
+  - Applies optional runtime map upscaling after logical generation (default `k=3`).
 - `MapEcsBridge` (`Assets/_Project/Scripts/Map/MapEcsBridge.cs`)
   - Publishes generated map metadata and walkability grid into ECS singleton/buffer for simulation systems.
 
@@ -59,10 +60,19 @@ This creates stripe/isoline-style corridors suitable for labyrinth layouts.
   - Re-run flood-fill.
 - Final unreachable cleanup ensures final ground set is center-connected.
 
+7. **Runtime upscaling (post-generate, optional)**
+- `MapGenerationController` keeps logical generation unchanged, then expands the produced `MapData` into a runtime grid.
+- Default runtime scale factor is `3`, so each logical cell becomes a `3x3` runtime block.
+- `tileSize` and `origin` remain unchanged.
+- Runtime world size grows because runtime `width` and `height` are multiplied by `k`.
+- `centerOpenRadius` and gate centers are scaled to match the expanded grid.
+- `spawnMargin` is intentionally left unscaled (same cell count) for now.
+
 ## Spawn Ring
 - `spawnMargin` expands bounds beyond the play area for spawn systems.
 - Spawn ring is represented in `MapData` bounds and gizmos only.
-- Tilemap renderer still renders play area only (`width x height`).
+- With runtime upscaling enabled, play area dimensions are expanded while `spawnMargin` remains unscaled by default.
+- Tilemap renderer still renders play area only (`width x height`), but now it renders the expanded runtime grid.
 
 ## Rendering: cliff autotile
 - Cliff rendering uses a 4-neighbor mask around each `Cliff` cell.
@@ -87,7 +97,7 @@ This creates stripe/isoline-style corridors suitable for labyrinth layouts.
 - Final walkable cells are center-reachable.
 
 ## ECS Bridge
-- On each regenerate, `MapGenerationController` calls `MapEcsBridge.Sync(CurrentMap)`.
+- On each regenerate, `MapGenerationController` calls `MapEcsBridge.Sync(CurrentMap)` using the runtime-expanded `MapData`.
 - Bridge data:
   - `MapRuntimeData` singleton: width/height/tileSize/origin/spawnMargin/center
   - `MapWalkableCell` dynamic buffer: dense walkability grid (`0/1`)
@@ -95,12 +105,14 @@ This creates stripe/isoline-style corridors suitable for labyrinth layouts.
   - `WallFieldDirtyTag`: triggers single rebuild of wall distance/normal field for the new map
   - `WallFieldBuildSystem` caches its map/wall singleton queries in `OnCreate` (no per-frame query creation in `OnUpdate`)
 - This enables Burst ECS systems to query map walkability without managed `MapData` access.
+- `MapEcsBridge` preserves `tileSize` and `origin`; `SpawnMargin` is intentionally not scaled upstream unless explicitly changed.
 
 ## Performance Notes
 - Generation is init/regenerate-time only; no per-frame allocation from this module.
 - Main complexity is linear per pass: `O(width*height)`.
 - Additional gate-corridor work is bounded by gate count and map area.
 - Tilemap rebuild uses `SetTilesBlock` in one batch per regenerate.
+- Runtime upscaling adds a post-generate expansion pass: `O(runtimeWidth*runtimeHeight)` at regenerate time only.
 
 ## Verification (Unity)
 1. Enter Play Mode in `SampleScene`.
@@ -112,6 +124,7 @@ This creates stripe/isoline-style corridors suitable for labyrinth layouts.
 - yellow wireframe = spawn bounds (outside play area)
 - cyan circles = gates on all sides
 6. Use component context menu `Regenerate Map` and verify deterministic output for fixed seed.
+7. In Development build or Editor, verify one debug log on first map build shows logical dimensions, runtime dimensions, and scale factor.
 
 ## Flow Field Gizmos
 - Optional Scene View debug drawer:

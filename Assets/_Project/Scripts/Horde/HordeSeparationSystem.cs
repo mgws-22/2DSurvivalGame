@@ -50,14 +50,14 @@ namespace Project.Horde
                 Entity configEntity = state.EntityManager.CreateEntity(typeof(HordeSeparationConfig));
                 state.EntityManager.SetComponentData(configEntity, new HordeSeparationConfig
                 {
-                    Radius = 0.20f,
+                    Radius = 0.6f,
                     CellSizeFactor = 1.25f,
-                    InfluenceRadiusFactor = 2.00f,
+                    InfluenceRadiusFactor = 3.00f,
 
-                    SeparationStrength = 1.00f,
+                    SeparationStrength = 20.00f,
 
                     // Units/second budget (dt-scaled) :contentReference[oaicite:9]{index=9}
-                    MaxPushPerFrame = 1.5f,
+                    MaxPushPerFrame = 6.5f,
 
                     MaxNeighbors = 32,
                     Iterations = 2,
