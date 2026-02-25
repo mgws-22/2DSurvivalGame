@@ -90,6 +90,12 @@ namespace Project.Horde
         public float PressureStrength;
         public float MaxPushPerFrame;
         public float SpeedFractionCap;
+        public float PressureParallelScale;
+        public float PressurePerpScale;
+        public float WallTangentStrength;
+        public float WallTangentMaxPushPerFrame;
+        public float WallNearDistanceCells;
+        public float DenseUnitsPerCellThreshold;
         public float BackpressureThreshold;
         public float MinSpeedFactor;
         public float BackpressureK;
@@ -98,6 +104,7 @@ namespace Project.Horde
         public int FieldUpdateIntervalFrames;
         public int BlurPasses;
         public byte DisablePairwiseSeparationWhenPressureEnabled;
+        public byte EnableWallTangentDriftDebug;
     }
 
     public struct ZombieAccelerationConfig : IComponentData

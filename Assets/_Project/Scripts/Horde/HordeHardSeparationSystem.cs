@@ -70,13 +70,13 @@ namespace Project.Horde
                     JamPressureThreshold = 8f,
                     DensePressureThreshold = 12f,
 
-                    SlowSpeedFraction = 0.20f,
+                    SlowSpeedFraction = 0.40f,
 
                     IterationsJam = 3,
                     MaxNeighborsJam = 32,
 
                     // Position correction caps (treat as "max correction per iter")
-                    MaxPushPerFrameJam = 0.02f,
+                    MaxPushPerFrameJam = 0.04f,
 
                     Radius = 0.60f,
                     CellSize = 1.20f,          // ~= (2*Radius)*1.25 = 0.4*1.25 = 0.5
@@ -84,7 +84,7 @@ namespace Project.Horde
                     MaxNeighbors = 28,
                     Iterations = 2,
 
-                    MaxCorrectionPerIter = 0.2f,
+                    MaxCorrectionPerIter = 0.02f,
                     Slop = 0.02f
                 });
             }

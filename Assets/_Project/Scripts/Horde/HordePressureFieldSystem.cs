@@ -18,18 +18,23 @@ namespace Project.Horde
     {
         private const float Epsilon = 1e-6f;
         private const float Diagonal = 0.70710677f;
+        private const int DebugLogIntervalFrames = 120;
 
         private NativeArray<int> _density;
         private NativeArray<int> _densityPerThread;
         private int _workerCount;
         private NativeArray<float> _pressureA;
         private NativeArray<float> _pressureB;
+        private NativeArray<int> _wallTangentEligiblePerThread;
         private int _cellCount;
         private int _frameIndex;
         private byte _activePressureBuffer;
         private Entity _pressureFieldEntity;
         private EntityQuery _pressureBufferQuery;
         private BufferLookup<PressureCell> _pressureLookup;
+        private JobHandle _lastApplyPressureHandle;
+        private byte _hasLastApplyPressureHandle;
+        private int _lastWallTangentDebugLogFrame;
 
         public void OnCreate(ref SystemState state)
         {
@@ -57,6 +62,13 @@ namespace Project.Horde
                     // Pressure uses only part of moveSpeed*dt budget :contentReference[oaicite:4]{index=4}
                     SpeedFractionCap = 0.45f,
 
+                    PressureParallelScale = 0.35f,
+                    PressurePerpScale = 1.15f,
+                    WallTangentStrength = 22.75f,
+                    WallTangentMaxPushPerFrame = 22.25f,
+                    WallNearDistanceCells = 21.25f,
+                    DenseUnitsPerCellThreshold = 52.0f,
+
                     // Backpressure is applied as: raw = 1/(1+K*excess), clamped :contentReference[oaicite:5]{index=5}
                     BackpressureThreshold = 10.0f,
                     MinSpeedFactor = 0.15f,
@@ -70,7 +82,8 @@ namespace Project.Horde
                     FieldUpdateIntervalFrames = 2,
                     BlurPasses = 1,
 
-                    DisablePairwiseSeparationWhenPressureEnabled = 0
+                    DisablePairwiseSeparationWhenPressureEnabled = 0,
+                    EnableWallTangentDriftDebug = 0
                 });
             }
 
@@ -90,6 +103,11 @@ namespace Project.Horde
             }
 
             _pressureLookup = state.GetBufferLookup<PressureCell>(false);
+            int maxWorkerCount = math.max(1, JobsUtility.MaxJobThreadCount);
+            _wallTangentEligiblePerThread = new NativeArray<int>(maxWorkerCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _lastApplyPressureHandle = default;
+            _hasLastApplyPressureHandle = 0;
+            _lastWallTangentDebugLogFrame = -DebugLogIntervalFrames;
             state.RequireForUpdate<HordePressureConfig>();
         }
 
@@ -115,11 +133,18 @@ namespace Project.Horde
                 _pressureB.Dispose();
             }
 
+            if (_wallTangentEligiblePerThread.IsCreated)
+            {
+                _wallTangentEligiblePerThread.Dispose();
+            }
+
             _cellCount = 0;
             _workerCount = 0;
             _frameIndex = 0;
             _activePressureBuffer = 0;
             _pressureFieldEntity = Entity.Null;
+            _lastApplyPressureHandle = default;
+            _hasLastApplyPressureHandle = 0;
         }
 
         public void OnUpdate(ref SystemState state)
@@ -164,6 +189,42 @@ namespace Project.Horde
                 changedDefaults = true;
             }
 
+            if (config.PressureParallelScale <= 0f)
+            {
+                config.PressureParallelScale = 0.35f;
+                changedDefaults = true;
+            }
+
+            if (config.PressurePerpScale <= 0f)
+            {
+                config.PressurePerpScale = 1.25f;
+                changedDefaults = true;
+            }
+
+            if (config.WallTangentStrength <= 0f)
+            {
+                config.WallTangentStrength = 0.75f;
+                changedDefaults = true;
+            }
+
+            if (config.WallTangentMaxPushPerFrame <= 0f)
+            {
+                config.WallTangentMaxPushPerFrame = 1.25f;
+                changedDefaults = true;
+            }
+
+            if (config.WallNearDistanceCells <= 0f)
+            {
+                config.WallNearDistanceCells = 1.25f;
+                changedDefaults = true;
+            }
+
+            if (config.DenseUnitsPerCellThreshold <= 0f)
+            {
+                config.DenseUnitsPerCellThreshold = 5.0f;
+                changedDefaults = true;
+            }
+
             if (changedDefaults)
             {
                 SystemAPI.SetSingleton(config);
@@ -174,6 +235,13 @@ namespace Project.Horde
                 _frameIndex++;
                 return;
             }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            TryLogWallTangentDebug(config);
+#endif
+
+            bool hasWallField = SystemAPI.TryGetSingleton(out WallFieldSingleton wallSingleton) && wallSingleton.Blob.IsCreated;
+            BlobAssetReference<WallFieldBlob> wallBlob = hasWallField ? wallSingleton.Blob : default;
 
             ref FlowFieldBlob flow = ref flowSingleton.Blob.Value;
             int cellCount = flow.Width * flow.Height;
@@ -198,12 +266,36 @@ namespace Project.Horde
             float maxPushFromSpeed = referenceMoveSpeed * deltaTime * speedFractionCap;
             float maxPushThisFrame = math.min(maxPushFromConfig, maxPushFromSpeed);
             float blockedPenalty = math.max(0f, config.BlockedCellPenalty);
+            float pressureParallelScale = math.max(0f, config.PressureParallelScale);
+            float pressurePerpScale = math.max(0f, config.PressurePerpScale);
+            float wallTangentStrength = math.max(0f, config.WallTangentStrength);
+            float wallTangentMaxPush = math.max(0f, config.WallTangentMaxPushPerFrame) * deltaTime;
+            float wallNearDistanceCells = math.max(0f, config.WallNearDistanceCells);
+            float denseUnitsThreshold = math.max(0f, config.DenseUnitsPerCellThreshold);
             int fieldInterval = math.clamp(config.FieldUpdateIntervalFrames, 1, 8);
             int blurPasses = math.clamp(config.BlurPasses, 0, 2);
             bool shouldRebuild = resized || ((_frameIndex % fieldInterval) == 0);
             _pressureLookup.Update(ref state);
 
             JobHandle dependency = state.Dependency;
+            if (_hasLastApplyPressureHandle != 0)
+            {
+                dependency = JobHandle.CombineDependencies(dependency, _lastApplyPressureHandle);
+            }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            bool wallTangentDebugEnabled = config.EnableWallTangentDriftDebug != 0;
+#else
+            bool wallTangentDebugEnabled = false;
+#endif
+            if (wallTangentDebugEnabled && _wallTangentEligiblePerThread.IsCreated)
+            {
+                ClearIntArrayJob clearWallTangentDebugJob = new ClearIntArrayJob
+                {
+                    Values = _wallTangentEligiblePerThread
+                };
+                dependency = clearWallTangentDebugJob.Schedule(_wallTangentEligiblePerThread.Length, 32, dependency);
+            }
             NativeArray<float> activePressure = _activePressureBuffer == 0 ? _pressureA : _pressureB;
 
             if (_pressureFieldEntity == Entity.Null || !state.EntityManager.Exists(_pressureFieldEntity))
@@ -298,17 +390,64 @@ namespace Project.Horde
             ApplyPressureJob applyPressureJob = new ApplyPressureJob
             {
                 Flow = flowSingleton.Blob,
+                Wall = wallBlob,
+                HasWallField = hasWallField ? (byte)1 : (byte)0,
                 Pressure = activePressure,
+                Density = _density,
                 PressureStrength = pressureStrength,
                 MaxPush = maxPushThisFrame,
                 SpeedFractionCap = speedFractionCap,
+                PressureParallelScale = pressureParallelScale,
+                PressurePerpScale = pressurePerpScale,
+                WallTangentStrength = wallTangentStrength,
+                WallTangentMaxPush = wallTangentMaxPush,
+                WallNearDistanceCells = wallNearDistanceCells,
+                DenseUnitsPerCellThreshold = denseUnitsThreshold,
                 BlockedPenalty = blockedPenalty,
                 CenterWorld = mapData.CenterWorld,
-                DeltaTime = deltaTime
+                DeltaTime = deltaTime,
+                WallTangentDebugEnabled = wallTangentDebugEnabled ? (byte)1 : (byte)0,
+                DebugWallTangentEligiblePerThread = _wallTangentEligiblePerThread
             };
-            state.Dependency = applyPressureJob.ScheduleParallel(dependency);
+            JobHandle applyHandle = applyPressureJob.ScheduleParallel(dependency);
+            state.Dependency = applyHandle;
+            _lastApplyPressureHandle = applyHandle;
+            _hasLastApplyPressureHandle = 1;
             _frameIndex++;
         }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private void TryLogWallTangentDebug(HordePressureConfig config)
+        {
+            if (config.EnableWallTangentDriftDebug == 0)
+            {
+                return;
+            }
+
+            if ((_frameIndex - _lastWallTangentDebugLogFrame) < DebugLogIntervalFrames)
+            {
+                return;
+            }
+
+            if (_hasLastApplyPressureHandle == 0 || !_lastApplyPressureHandle.IsCompleted)
+            {
+                return;
+            }
+
+            _lastApplyPressureHandle.Complete();
+            int count = 0;
+            for (int i = 0; i < _wallTangentEligiblePerThread.Length; i++)
+            {
+                count += _wallTangentEligiblePerThread[i];
+            }
+
+            _lastWallTangentDebugLogFrame = _frameIndex;
+            UnityEngine.Debug.Log(
+                "[HordePressure] WallTangentEligibleUnits=" + count +
+                " frame=" + _frameIndex + ".");
+        }
+#endif
+
 
         private bool EnsureFieldSize(int cellCount)
         {
@@ -530,15 +669,33 @@ namespace Project.Horde
         private partial struct ApplyPressureJob : IJobEntity
         {
             [ReadOnly] public BlobAssetReference<FlowFieldBlob> Flow;
+            [ReadOnly] public BlobAssetReference<WallFieldBlob> Wall;
+            public byte HasWallField;
             [ReadOnly] public NativeArray<float> Pressure;
+            [ReadOnly] public NativeArray<int> Density;
             public float PressureStrength;
             public float MaxPush;
             public float SpeedFractionCap;
+            public float PressureParallelScale;
+            public float PressurePerpScale;
+            public float WallTangentStrength;
+            public float WallTangentMaxPush;
+            public float WallNearDistanceCells;
+            public float DenseUnitsPerCellThreshold;
             public float BlockedPenalty;
             public float2 CenterWorld;
             public float DeltaTime;
+            public byte WallTangentDebugEnabled;
+            [NativeDisableParallelForRestriction] public NativeArray<int> DebugWallTangentEligiblePerThread;
+            [NativeSetThreadIndex] public int ThreadIndex;
 
-            private void Execute([EntityIndexInQuery] int entityIndex, ref LocalTransform transform, in ZombieTag tag, in ZombieMoveSpeed moveSpeed)
+            private void Execute(
+                [EntityIndexInQuery] int entityIndex,
+                ref LocalTransform transform,
+                in ZombieTag tag,
+                in ZombieMoveSpeed moveSpeed,
+                in ZombieGoalIntent goalIntent,
+                in ZombieVelocity velocity)
             {
                 if (DeltaTime <= 0f)
                 {
@@ -587,6 +744,15 @@ namespace Project.Horde
                     flowDirection = float2.zero;
                 }
 
+                float2 desiredDir = ResolveDesiredDirection(goalIntent.Direction, velocity.Value, flowDirection);
+
+                float speedBudget = moveStep * SpeedFractionCap;
+                float effectiveCap = math.min(MaxPush, speedBudget);
+                if (effectiveCap <= 0f)
+                {
+                    return;
+                }
+
                 float2 pressureDelta = float2.zero;
                 float2 direction = ResolvePressureDirection(cell, position, entityIndex, localPressure, ref flow);
                 float dirLenSq = math.lengthsq(direction);
@@ -598,20 +764,37 @@ namespace Project.Horde
                     {
                         direction *= math.rsqrt(dirLenSq);
                         float rawPush = localPressure * PressureStrength * DeltaTime;
-                        float speedBudget = moveStep * SpeedFractionCap;
-                        float effectiveCap = math.min(MaxPush, speedBudget);
-                        if (effectiveCap > 0f)
+                        if (rawPush > 0f)
                         {
-                            float push = math.min(rawPush, effectiveCap);
-                            if (push > 0f)
-                            {
-                                pressureDelta = direction * push;
-                            }
+                            pressureDelta = direction * rawPush;
+                            pressureDelta = ApplyAnisotropicPressure(pressureDelta, desiredDir, PressureParallelScale, PressurePerpScale);
                         }
                     }
                 }
 
-                float2 candidate = position + pressureDelta;
+                float localDensity = (index >= 0 && index < Density.Length) ? Density[index] : 0f;
+                bool densityHigh = localDensity >= DenseUnitsPerCellThreshold;
+                float2 tangentDelta = float2.zero;
+                if (densityHigh)
+                {
+                    float2 wallNormal;
+                    float wallDistCells;
+                    bool wallNear = TryGetWallNearData(position, out wallNormal, out wallDistCells) && wallDistCells <= WallNearDistanceCells;
+                    if (wallNear)
+                    {
+                        CountWallTangentEligibleDebug();
+                        tangentDelta = ComputeWallTangentDelta(wallNormal, desiredDir);
+                    }
+                }
+
+                float2 totalDelta = pressureDelta + tangentDelta;
+                float totalLenSq = math.lengthsq(totalDelta);
+                if (totalLenSq > (effectiveCap * effectiveCap) && totalLenSq > Epsilon)
+                {
+                    totalDelta *= effectiveCap * math.rsqrt(totalLenSq);
+                }
+
+                float2 candidate = position + totalDelta;
                 if (math.lengthsq(candidate - position) <= Epsilon)
                 {
                     return;
@@ -623,6 +806,129 @@ namespace Project.Horde
                 }
 
                 transform.Position = new float3(candidate.x, candidate.y, transform.Position.z);
+            }
+
+            private float2 ComputeWallTangentDelta(float2 wallNormal, float2 desiredDir)
+            {
+                if (WallTangentStrength <= 0f || WallTangentMaxPush <= 0f)
+                {
+                    return float2.zero;
+                }
+
+                float desiredLenSq = math.lengthsq(desiredDir);
+                if (desiredLenSq <= Epsilon)
+                {
+                    return float2.zero;
+                }
+
+                float2 tangent = new float2(-wallNormal.y, wallNormal.x);
+                float tangentLenSq = math.lengthsq(tangent);
+                if (tangentLenSq <= Epsilon)
+                {
+                    return float2.zero;
+                }
+
+                tangent *= math.rsqrt(tangentLenSq);
+                if (math.dot(tangent, desiredDir) < 0f)
+                {
+                    tangent = -tangent;
+                }
+
+                float tangentPush = math.min(WallTangentStrength * DeltaTime, WallTangentMaxPush);
+                if (tangentPush <= 0f)
+                {
+                    return float2.zero;
+                }
+
+                return tangent * tangentPush;
+            }
+
+            private void CountWallTangentEligibleDebug()
+            {
+                if (WallTangentDebugEnabled == 0 || DebugWallTangentEligiblePerThread.Length <= 0)
+                {
+                    return;
+                }
+
+                int workerIndex = math.clamp(ThreadIndex - 1, 0, DebugWallTangentEligiblePerThread.Length - 1);
+                DebugWallTangentEligiblePerThread[workerIndex] = DebugWallTangentEligiblePerThread[workerIndex] + 1;
+            }
+
+            private float2 ResolveDesiredDirection(float2 goalIntentDirection, float2 velocity, float2 flowDirection)
+            {
+                float2 d = NormalizeIfFinite(goalIntentDirection);
+                if (math.lengthsq(d) > Epsilon)
+                {
+                    return d;
+                }
+
+                d = NormalizeIfFinite(flowDirection);
+                if (math.lengthsq(d) > Epsilon)
+                {
+                    return d;
+                }
+
+                return NormalizeIfFinite(velocity);
+            }
+
+            private static float2 ApplyAnisotropicPressure(float2 force, float2 desiredDir, float parallelScale, float perpScale)
+            {
+                float desiredLenSq = math.lengthsq(desiredDir);
+                if (desiredLenSq <= Epsilon)
+                {
+                    return force;
+                }
+
+                float2 desiredN = desiredDir * math.rsqrt(desiredLenSq);
+                float2 parallel = math.dot(force, desiredN) * desiredN;
+                float2 perp = force - parallel;
+                return (parallel * parallelScale) + (perp * perpScale);
+            }
+
+            private bool TryGetWallNearData(float2 worldPosition, out float2 wallNormal, out float wallDistCells)
+            {
+                wallNormal = float2.zero;
+                wallDistCells = float.MaxValue;
+                if (HasWallField == 0 || !Wall.IsCreated)
+                {
+                    return false;
+                }
+
+                ref WallFieldBlob wall = ref Wall.Value;
+                int2 wallCell = WorldToWallGrid(worldPosition, ref wall);
+                if (!IsInWallBounds(wallCell, ref wall))
+                {
+                    return false;
+                }
+
+                int wallIndex = wallCell.x + (wallCell.y * wall.Width);
+                if (wallIndex < 0 || wallIndex >= wall.Dist.Length || wallIndex >= wall.Dir.Length)
+                {
+                    return false;
+                }
+
+                ushort dist = wall.Dist[wallIndex];
+                if (dist == ushort.MaxValue)
+                {
+                    return false;
+                }
+
+                wallDistCells = dist;
+                byte dir = wall.Dir[wallIndex];
+                if (dir >= wall.DirLut.Length)
+                {
+                    return false;
+                }
+
+                float2 n = wall.DirLut[dir];
+                float nLenSq = math.lengthsq(n);
+                if (nLenSq <= Epsilon)
+                {
+                    return false;
+                }
+
+                wallNormal = n * math.rsqrt(nLenSq);
+                return true;
             }
 
             private float2 ResolvePressureDirection(int2 cell, float2 worldPosition, int entityIndex, float localPressure, ref FlowFieldBlob flow)
@@ -676,7 +982,6 @@ namespace Project.Horde
                     return AddSpreadBias(bestDirection, cell, worldPosition, entityIndex, ref flow);
                 }
 
-                // If all immediate neighbors are similarly dense, push away from blocked pressure.
                 float2 wallGradient = float2.zero;
                 for (int oy = -1; oy <= 1; oy++)
                 {
@@ -764,8 +1069,18 @@ namespace Project.Horde
                     return direction;
                 }
 
-                // Remove only the backwards component along flow to avoid pressure driving away from the goal.
                 return direction - (flowN * flowDot);
+            }
+
+            private static float2 NormalizeIfFinite(float2 v)
+            {
+                float lenSq = math.lengthsq(v);
+                if (lenSq <= Epsilon || !math.isfinite(lenSq))
+                {
+                    return float2.zero;
+                }
+
+                return v * math.rsqrt(lenSq);
             }
 
             private static float2 DeterministicUnitDir(int entityIndex, int2 cell)
@@ -856,6 +1171,17 @@ namespace Project.Horde
                 }
 
                 return flow.Dist[index] != ushort.MaxValue;
+            }
+
+            private static int2 WorldToWallGrid(float2 world, ref WallFieldBlob wall)
+            {
+                float2 local = (world - wall.OriginWorld) / wall.CellSize;
+                return (int2)math.floor(local);
+            }
+
+            private static bool IsInWallBounds(int2 grid, ref WallFieldBlob wall)
+            {
+                return grid.x >= 0 && grid.y >= 0 && grid.x < wall.Width && grid.y < wall.Height;
             }
         }
 

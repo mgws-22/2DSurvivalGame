@@ -1629,3 +1629,34 @@
 3. In Console (Editor/Development), verify one log line reports logical dims, runtime dims, and `scaleFactor=3`.
 4. Verify zombies spawn around the expanded play area using the same `spawnMargin` cell count.
 5. Verify flow/wall fields rebuild for the expanded map and `GC Alloc = 0 B` in gameplay loop.
+
+## 2026-02-25 - Horde pressure anisotropy and wall-tangent drift
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/ZombieComponents.cs` (`HordePressureConfig`) with new tunables for crowd shaping near walls:
+  - `PressureParallelScale`
+  - `PressurePerpScale`
+  - `WallTangentStrength`
+  - `WallTangentMaxPushPerFrame`
+  - `WallNearDistanceCells`
+  - `DenseUnitsPerCellThreshold`
+  - `EnableWallTangentDriftDebug` (`0/1`)
+- Updated `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`:
+  - pressure displacement is now anisotropically scaled relative to desired movement direction (reduce forward compression, increase lateral spread)
+  - adds wall-tangent drift when `wall-near && locally dense`, using `WallFieldSingleton` distance/normal sampling
+  - tangent sign is chosen to support forward goal progress
+  - combined pressure+tangent displacement is still capped by the existing final per-frame budget
+  - added throttled debug-only counter/log for wall-tangent eligible units (no per-frame allocations)
+
+### Why
+- Dense groups moving along long walls tended to collapse into a very tight straight queue.
+- Isotropic pressure only spreads away from local density gradients and can preserve narrow wall-hugging lines.
+- Anisotropic scaling plus tangent drift encourages lateral spreading while keeping deterministic flow toward the goal.
+
+### How to test
+1. Open `Assets/Scenes/SampleScene.unity` and enter Play Mode.
+2. Create/maintain a long wall and drive a dense horde along it.
+3. Verify units spread laterally more and avoid collapsing into a single ultra-tight line along the wall.
+4. Verify movement remains smooth (no obvious jitter increase).
+5. Confirm `GC Alloc = 0 B` in Profiler during gameplay.
+6. Optional debug: set `EnableWallTangentDriftDebug = 1` on the `HordePressureConfig` singleton and verify a throttled log appears (roughly every 120 frames) with eligible unit count.
