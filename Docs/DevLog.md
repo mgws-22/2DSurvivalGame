@@ -1,5 +1,40 @@
 # DevLog
 
+## 2026-02-25 - Wall placement hitch reduction (async wall-field rebuild + obstacle mask)
+
+### What changed
+- Optimized obstacle stamping diagnostics and guardrails:
+  - `Assets/_Project/Scripts/Buildings/BuildingObstacleStampSystem.cs`
+  - keeps stamping query to unstamped buildings only
+  - adds one-shot warning if `DynamicObstacleRect` grows on a frame with no new stamps
+- Reworked wall-field rebuild pipeline:
+  - `Assets/_Project/Scripts/Map/WallFieldBuildSystem.cs`
+  - async rebuild job (distance + direction) with previous blob kept active until completion
+  - persistent reusable `NativeArray` buffers (no large temp array reallocation per rebuild)
+  - expanded-grid obstacle occupancy mask built once per rebuild (removes per-tile rect scan)
+  - dirty tag cleared after successful/current rebuild completion
+  - throttled Development/Editor stats log (rebuild count, rect count, last rebuild ms)
+- Added wall-field rebuild stats component:
+  - `Assets/_Project/Scripts/Map/WallFieldComponents.cs` (`WallFieldStats`)
+- Updated building obstacle docs:
+  - `Docs/Systems/Buildings/BuildingObstacles.md`
+
+### Why
+- Placing a wall triggered a full main-thread wall-field rebuild with large temp allocations and an `O(tileCount * rectCount)` dynamic obstacle scan.
+- This caused a visible hitch on placement, especially as wall count increased.
+- The new pipeline preserves behavior (walls still block via wall repulsion) while moving the heavy distance/gradient work off the placement frame and removing the worst rebuild complexity term.
+
+### How to test
+1. Enter Play Mode and place the first wall.
+2. Confirm the placement frame no longer hitches noticeably.
+3. Open Profiler CPU Timeline and verify `WallFieldBuildSystem` no longer shows a large main-thread spike on the placement frame.
+4. Confirm the wall field updates within a few frames (zombies jam against the placed wall shortly after).
+5. In Development/Editor Console, verify throttled `WallFieldBuildSystem` stats logs show:
+   - `RebuildCount` increasing only on completed rebuilds
+   - `RectCount` tracking placed walls
+   - `LastRebuildMs` reported (not per-frame spam)
+6. Let the game run without placing walls and confirm `RebuildCount` does not keep increasing.
+
 ## 2026-02-25 - Wall placement click fix (UI hit test + validity feedback + runtime catalog sync)
 
 ### What changed

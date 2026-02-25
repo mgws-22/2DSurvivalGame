@@ -23,4 +23,11 @@ namespace Project.Map
     public struct WallFieldDirtyTag : IComponentData
     {
     }
+
+    public struct WallFieldStats : IComponentData
+    {
+        public uint RebuildCount;
+        public int RectCount;
+        public float LastRebuildMs;
+    }
 }

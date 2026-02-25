@@ -52,8 +52,10 @@ Runtime UI / input:
 11. It appends the rectangle to the singleton `DynamicObstacleRect` buffer.
 12. It marks the building with `ObstacleStampedTag` so stamping happens only once per entity.
 13. If any building was stamped, it adds `WallFieldDirtyTag` to the map entity.
-14. `WallFieldBuildSystem` rebuilds the wall field and treats dynamic obstacle rectangles as blocked seeds (`wallDist == 0`) in addition to static blocked map tiles.
-15. `WallRepulsionSystem` uses the wall field to repel/project zombies out of obstacle cells, but flow-field steering remains unchanged (no reroute).
+14. `WallFieldBuildSystem` schedules an async rebuild job and keeps using the previous wall-field blob until the new one is ready.
+15. During rebuild scheduling, dynamic obstacle rectangles are converted once into an expanded-grid occupancy mask (`O(rect area)` total) so per-tile obstacle checks are `O(1)`.
+16. On job completion, `WallFieldBuildSystem` swaps in the new blob, updates `WallFieldStats`, and clears `WallFieldDirtyTag` when the rebuilt snapshot still matches the current map/rect state.
+17. `WallRepulsionSystem` uses the wall field to repel/project zombies out of obstacle cells, but flow-field steering remains unchanged (no reroute).
 
 ## Invariants
 - Buildings added by this pipeline block zombies through wall repulsion only.
@@ -65,6 +67,7 @@ Runtime UI / input:
 - Wall repulsion hot path does not scan the obstacle rectangle list per zombie.
 - Runtime placement checks `DynamicObstacleRect` only on click to prevent stacking walls on the same cell.
 - Placement status feedback uses fixed reason strings (no per-frame string building).
+- `BuildingObstacleStampSystem` appends one `DynamicObstacleRect` per newly stamped building and should not grow when no new buildings are stamped.
 - No Unity Physics colliders or rigidbodies are required.
 
 ## Static Scene Wall Workflow
@@ -79,7 +82,8 @@ Runtime UI / input:
 - Build HUD is event-driven; placement mode per-frame work is limited to mouse-to-grid snap, manual UI raycast, validity checks, and ghost/status updates.
 - UI raycast hit testing reuses cached containers (`PointerEventData`, static `List<RaycastResult>`) to avoid per-frame allocations.
 - `BuildingObstacleStampSystem` performs structural changes only for newly stamped buildings (`ObstacleStampedTag`).
-- `WallFieldBuildSystem` checks dynamic rectangles only during wall-field rebuild, not per zombie.
+- `WallFieldBuildSystem` no longer performs a per-tile linear scan over all `DynamicObstacleRect`; it prebuilds an occupancy mask once per rebuild and uses `O(1)` blocked checks in the distance/gradient passes.
+- `WallFieldBuildSystem` reuses persistent `NativeArray` buffers and runs the distance/gradient rebuild job asynchronously, reducing the placement-frame main-thread hitch.
 - `WallRepulsionSystem` remains Burst/job-friendly and allocation-free per frame.
 
 ## Verification
@@ -89,4 +93,6 @@ Runtime UI / input:
 4. LMB place multiple walls and confirm `c:BuildingTag` entity count increases in Entities Hierarchy.
 5. Verify zombies jam against the placed walls (wall repulsion) and do not reroute around them.
 6. RMB cancel placement and confirm the ghost disappears and placement status clears.
-7. Profile and confirm `GC Alloc = 0 B` in the gameplay loop and no unexpected main-thread spikes/sync points.
+7. In Profiler, confirm the wall placement frame no longer shows a large main-thread `WallFieldBuildSystem` spike; rebuild work should complete asynchronously and swap later.
+8. Confirm `WallFieldStats.RebuildCount` increments on completed rebuilds (not every frame) and `DynamicObstacleRect` length tracks placed walls without creeping up when idle.
+9. Profile and confirm `GC Alloc = 0 B` in the gameplay loop and no unexpected main-thread spikes/sync points.

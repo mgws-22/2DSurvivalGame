@@ -13,6 +13,11 @@ namespace Project.Buildings
         private EntityQuery _mapQuery;
         private EntityQuery _registryQuery;
         private EntityQuery _unstampedBuildingsQuery;
+        private int _lastObservedRectCount;
+        private bool _hasObservedRectCount;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private bool _warnedUnexpectedRectGrowthWithoutStamp;
+#endif
 
         public void OnCreate(ref SystemState state)
         {
@@ -42,24 +47,33 @@ namespace Project.Buildings
 
         public void OnUpdate(ref SystemState state)
         {
-            if (_unstampedBuildingsQuery.IsEmptyIgnoreFilter)
+            EnsureRegistrySingleton(ref state);
+            if (_registryQuery.IsEmptyIgnoreFilter)
             {
                 return;
             }
 
-            EnsureRegistrySingleton(ref state);
-            if (_registryQuery.IsEmptyIgnoreFilter || _mapQuery.IsEmptyIgnoreFilter)
+            Entity registryEntity = _registryQuery.GetSingletonEntity();
+            DynamicBuffer<DynamicObstacleRect> obstacleRects = state.EntityManager.GetBuffer<DynamicObstacleRect>(registryEntity);
+            bool hasUnstampedBuildings = !_unstampedBuildingsQuery.IsEmptyIgnoreFilter;
+
+            if (!hasUnstampedBuildings)
             {
+                UpdateRectGrowthDiagnostics(obstacleRects.Length, false);
+                return;
+            }
+
+            if (_mapQuery.IsEmptyIgnoreFilter)
+            {
+                UpdateRectGrowthDiagnostics(obstacleRects.Length, false);
                 return;
             }
 
             Entity mapEntity = _mapQuery.GetSingletonEntity();
             MapRuntimeData map = state.EntityManager.GetComponentData<MapRuntimeData>(mapEntity);
 
-            Entity registryEntity = _registryQuery.GetSingletonEntity();
-            DynamicBuffer<DynamicObstacleRect> obstacleRects = state.EntityManager.GetBuffer<DynamicObstacleRect>(registryEntity);
-
             bool anyStamped = false;
+            int stampedCount = 0;
             EntityCommandBuffer ecb = default;
 
             foreach (var (footprint, transform, entity) in SystemAPI
@@ -83,19 +97,22 @@ namespace Project.Buildings
                         MinCell = clampedMin,
                         MaxCellExclusive = clampedMax
                     });
-                }
 
-                if (!anyStamped)
-                {
-                    ecb = new EntityCommandBuffer(Allocator.Temp);
-                }
+                    if (!anyStamped)
+                    {
+                        ecb = new EntityCommandBuffer(Allocator.Temp);
+                    }
 
-                ecb.AddComponent<ObstacleStampedTag>(entity);
-                anyStamped = true;
+                    // Mark only after the rect append has been applied.
+                    ecb.AddComponent<ObstacleStampedTag>(entity);
+                    anyStamped = true;
+                    stampedCount++;
+                }
             }
 
             if (!anyStamped)
             {
+                UpdateRectGrowthDiagnostics(obstacleRects.Length, false);
                 return;
             }
 
@@ -104,8 +121,10 @@ namespace Project.Buildings
                 state.EntityManager.AddComponent<WallFieldDirtyTag>(mapEntity);
             }
 
+            int rectCountAfterStamp = obstacleRects.Length;
             ecb.Playback(state.EntityManager);
             ecb.Dispose();
+            UpdateRectGrowthDiagnostics(rectCountAfterStamp, stampedCount > 0);
         }
 
         private void EnsureRegistrySingleton(ref SystemState state)
@@ -117,6 +136,25 @@ namespace Project.Buildings
 
             Entity registryEntity = state.EntityManager.CreateEntity(typeof(DynamicObstacleRegistryTag));
             state.EntityManager.AddBuffer<DynamicObstacleRect>(registryEntity);
+        }
+
+        private void UpdateRectGrowthDiagnostics(int currentRectCount, bool hadNewStamps)
+        {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (!hadNewStamps &&
+                _hasObservedRectCount &&
+                currentRectCount > _lastObservedRectCount &&
+                !_warnedUnexpectedRectGrowthWithoutStamp)
+            {
+                _warnedUnexpectedRectGrowthWithoutStamp = true;
+                UnityEngine.Debug.LogWarning(
+                    "[BuildingObstacleStampSystem] DynamicObstacleRect length increased without stamping new buildings. " +
+                    "This suggests duplicate appends or external writes.");
+            }
+#endif
+
+            _lastObservedRectCount = currentRectCount;
+            _hasObservedRectCount = true;
         }
     }
 }
