@@ -35,6 +35,9 @@ namespace Project.Horde
         private JobHandle _lastApplyPressureHandle;
         private byte _hasLastApplyPressureHandle;
         private int _lastWallTangentDebugLogFrame;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private static bool s_loggedMissingPressureConfigCreatedOnce;
+#endif
 
         public void OnCreate(ref SystemState state)
         {
@@ -43,49 +46,7 @@ namespace Project.Horde
             state.RequireForUpdate<FlowFieldSingleton>();
             state.RequireForUpdate<MapRuntimeData>();
 
-            EntityQuery configQuery = state.GetEntityQuery(ComponentType.ReadWrite<HordePressureConfig>());
-            if (configQuery.IsEmptyIgnoreFilter)
-            {
-                Entity configEntity = state.EntityManager.CreateEntity(typeof(HordePressureConfig));
-                state.EntityManager.SetComponentData(configEntity, new HordePressureConfig
-                {
-                    Enabled = 1,
-
-                    TargetUnitsPerCell = 1.5f,
-
-                    // Keep it subtle; pressure should not feel like a separate motor
-                    PressureStrength = 122.25f,
-
-                    // Units/second (converted to per-frame with dt) :contentReference[oaicite:3]{index=3}
-                    MaxPushPerFrame = 122.0f,
-
-                    // Pressure uses only part of moveSpeed*dt budget :contentReference[oaicite:4]{index=4}
-                    SpeedFractionCap = 22.45f,
-
-                    PressureParallelScale = 0.05f,
-                    PressurePerpScale = 3.25f,
-                    WallTangentStrength = 22.75f,
-                    WallTangentMaxPushPerFrame = 2.25f,
-                    WallNearDistanceCells = 1000f,
-                    DenseUnitsPerCellThreshold = 00f,
-
-                    // Backpressure is applied as: raw = 1/(1+K*excess), clamped :contentReference[oaicite:5]{index=5}
-                    BackpressureThreshold = 10.0f,
-                    MinSpeedFactor = 0.15f,
-                    BackpressureK = 0.5f,
-                    BackpressureMaxFactor = 22.0f,
-
-                    // Enough to avoid drifting into blocked, but not “wall magnetism”
-                    BlockedCellPenalty = 6.0f,
-
-                    // Cheaper than every frame; still responsive
-                    FieldUpdateIntervalFrames = 2,
-                    BlurPasses = 1,
-
-                    DisablePairwiseSeparationWhenPressureEnabled = 0,
-                    EnableWallTangentDriftDebug = 0
-                });
-            }
+            EnsurePressureConfigSingleton(ref state);
 
             _pressureBufferQuery = state.GetEntityQuery(ComponentType.ReadWrite<PressureFieldBufferTag>());
             if (_pressureBufferQuery.IsEmptyIgnoreFilter)
@@ -109,6 +70,76 @@ namespace Project.Horde
             _hasLastApplyPressureHandle = 0;
             _lastWallTangentDebugLogFrame = -DebugLogIntervalFrames;
             state.RequireForUpdate<HordePressureConfig>();
+        }
+
+        private static void EnsurePressureConfigSingleton(ref SystemState state)
+        {
+            EntityManager entityManager = state.EntityManager;
+            EntityQuery configQuery = state.GetEntityQuery(ComponentType.ReadWrite<HordePressureConfig>());
+            int configCount = configQuery.CalculateEntityCount();
+
+            if (configCount <= 0)
+            {
+                Entity configEntity = entityManager.CreateEntity(typeof(HordePressureConfig));
+                entityManager.SetComponentData(configEntity, CreateDefaultPressureConfig());
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                if (!s_loggedMissingPressureConfigCreatedOnce)
+                {
+                    UnityEngine.Debug.Log("[HordePressure] Created missing HordePressureConfig singleton using defaults.");
+                    s_loggedMissingPressureConfigCreatedOnce = true;
+                }
+#endif
+                configQuery.Dispose();
+                return;
+            }
+
+            if (configCount > 1)
+            {
+                using NativeArray<Entity> entities = configQuery.ToEntityArray(Allocator.Temp);
+                Entity keep = entities[0];
+                for (int i = 1; i < entities.Length; i++)
+                {
+                    Entity entity = entities[i];
+                    if (entityManager.Exists(entity))
+                    {
+                        entityManager.DestroyEntity(entity);
+                    }
+                }
+
+                if (keep != Entity.Null && entityManager.Exists(keep) && !entityManager.HasComponent<HordePressureConfig>(keep))
+                {
+                    entityManager.AddComponentData(keep, CreateDefaultPressureConfig());
+                }
+            }
+
+            configQuery.Dispose();
+        }
+
+        private static HordePressureConfig CreateDefaultPressureConfig()
+        {
+            return new HordePressureConfig
+            {
+                Enabled = 1,
+                TargetUnitsPerCell = 1.5f,
+                PressureStrength = 1.25f,
+                MaxPushPerFrame = 2.0f,
+                SpeedFractionCap = 0.45f,
+                PressureParallelScale = 0.35f,
+                PressurePerpScale = 1.25f,
+                WallTangentStrength = 0.75f,
+                WallTangentMaxPushPerFrame = 1.25f,
+                WallNearDistanceCells = 1.25f,
+                DenseUnitsPerCellThreshold = 5.0f,
+                BackpressureThreshold = 10.0f,
+                MinSpeedFactor = 0.15f,
+                BackpressureK = 0.5f,
+                BackpressureMaxFactor = 22.0f,
+                BlockedCellPenalty = 6.0f,
+                FieldUpdateIntervalFrames = 2,
+                BlurPasses = 1,
+                DisablePairwiseSeparationWhenPressureEnabled = 0,
+                EnableWallTangentDriftDebug = 0
+            };
         }
 
         public void OnDestroy(ref SystemState state)

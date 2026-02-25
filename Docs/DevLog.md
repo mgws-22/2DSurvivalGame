@@ -1660,3 +1660,28 @@
 4. Verify movement remains smooth (no obvious jitter increase).
 5. Confirm `GC Alloc = 0 B` in Profiler during gameplay.
 6. Optional debug: set `EnableWallTangentDriftDebug = 1` on the `HordePressureConfig` singleton and verify a throttled log appears (roughly every 120 frames) with eligible unit count.
+
+## 2026-02-25 - HordePressureConfig authoring singleton + runtime fallback
+
+### What changed
+- Added `Assets/_Project/Scripts/Horde/HordePressureConfigAuthoring.cs`:
+  - `HordePressureConfigAuthoring` MonoBehaviour exposes inspector-editable fields mirroring `HordePressureConfig`
+  - `HordePressureConfigAuthoringBaker` bakes `HordePressureConfig` onto an ECS entity (`TransformUsageFlags.None`)
+- Updated `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs` startup path:
+  - centralizes default config values in `CreateDefaultPressureConfig()`
+  - ensures a `HordePressureConfig` singleton exists in `OnCreate`
+  - destroys duplicate `HordePressureConfig` entities on startup and keeps one singleton
+  - Development/Editor-only one-shot log if config was missing and created from defaults
+- Fixed the system's inline fallback defaults to the intended values (some values in the local file had become corrupted during earlier editing).
+
+### Why
+- `HordePressureFieldSystem` and other horde systems require `HordePressureConfig` to run, but the singleton was sometimes missing in runtime worlds.
+- Authoring + Baker provides a stable inspector-driven source of truth.
+- Startup fallback keeps runtime robust if the authoring component is not present.
+
+### How to test
+1. Add an empty GameObject in `Assets/Scenes/SampleScene.unity` and attach `HordePressureConfigAuthoring`.
+2. Enter Play Mode.
+3. Open `Window > Entities > Hierarchy`, select `Default World`, search `HordePressureConfig`, and verify exactly one entity exists.
+4. Verify values match the authoring component if present; otherwise verify defaults were created and (Editor/Development) a one-shot log appears.
+5. Confirm horde movement still runs and `GC Alloc = 0 B` in gameplay loop.

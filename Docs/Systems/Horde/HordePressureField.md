@@ -8,6 +8,8 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
 - `WallFieldSingleton` (`Assets/_Project/Scripts/Map/WallFieldComponents.cs`) for wall distance/normal gating
 - `ZombieTag`, `ZombieMoveSpeed`, `ZombieGoalIntent`, `ZombieVelocity`, `LocalTransform` (`Assets/_Project/Scripts/Horde/ZombieComponents.cs`)
 - `HordePressureConfig` (`Assets/_Project/Scripts/Horde/ZombieComponents.cs`)
+- `HordePressureConfigAuthoring` (`Assets/_Project/Scripts/Horde/HordePressureConfigAuthoring.cs`)
+  - MonoBehaviour + Baker for inspector-editable pressure config singleton values.
 - Runtime system:
   - `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs`
 
@@ -39,6 +41,9 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
 - `WallRepulsionSystem` remains the final blocked-cell safety correction.
 
 ## Invariants
+- `HordePressureConfig` singleton is guaranteed at runtime:
+  - preferred source: baked `HordePressureConfigAuthoring`
+  - fallback: `HordePressureFieldSystem.OnCreate` creates one default singleton if missing
 - No per-frame managed allocations in hot path.
 - Pressure field is always aligned to the same expanded grid as flow steering.
 - `MaxPushPerFrame` config is interpreted as units/second and converted to per-frame budget with `dt`.
@@ -85,7 +90,8 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
    - fewer ultra-tight single-file lines hugging the wall
    - movement remains smooth (no visible jitter increase)
 6. Optional debug: set `EnableWallTangentDriftDebug = 1` on the `HordePressureConfig` singleton and confirm a throttled log appears roughly every `120` frames with eligible unit count.
-7. Profiler watchlist:
+7. Open `Window > Entities > Hierarchy`, select `Default World`, and search for `HordePressureConfig` to verify the singleton exists.
+8. Profiler watchlist:
    - `GC Alloc` stays `0 B`
    - no unexpected `Complete()` sync spikes
    - main thread not regressed versus pairwise-only baseline
