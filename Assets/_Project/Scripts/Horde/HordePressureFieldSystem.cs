@@ -47,23 +47,23 @@ namespace Project.Horde
                     Enabled = 1,
 
                     // Pressure activates early enough to reduce jams near point targets
-                    TargetUnitsPerCell = 1.8f,
+                    TargetUnitsPerCell = 1f,
 
                     // Much lower than 10: pressure should not feel like a separate motor
-                    PressureStrength = 1f,
+                    PressureStrength = 2f,
 
                     // Set high so SpeedFractionCap becomes the real limiter
                     // (behavior becomes more predictable)
-                    MaxPushPerFrame = 4.0f,
+                    MaxPushPerFrame = 5.0f,
 
                     // Pressure may use only part of the moveSpeed*dt budget
-                    SpeedFractionCap = 0.15f,
+                    SpeedFractionCap = 0.9f,
 
                     // Tuning rule: keep free-flow speed at 1.0 until pressure exceeds threshold.
-                    BackpressureThreshold = 5f,
-                    MinSpeedFactor = 0.10f,
-                    BackpressureK = 2f,
-                    BackpressureMaxFactor = 22.0f,
+                    BackpressureThreshold = 6f,
+                    MinSpeedFactor = 0.15f,
+                    BackpressureK = 22f,
+                    BackpressureMaxFactor = 40.0f,
 
                     // Lower to avoid wall magnetism
                     BlockedCellPenalty = 3.0f,

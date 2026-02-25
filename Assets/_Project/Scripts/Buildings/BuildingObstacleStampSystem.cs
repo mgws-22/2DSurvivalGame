@@ -116,12 +116,12 @@ namespace Project.Buildings
                 return;
             }
 
+            int rectCountAfterStamp = obstacleRects.Length;
             if (!state.EntityManager.HasComponent<WallFieldDirtyTag>(mapEntity))
             {
                 state.EntityManager.AddComponent<WallFieldDirtyTag>(mapEntity);
             }
 
-            int rectCountAfterStamp = obstacleRects.Length;
             ecb.Playback(state.EntityManager);
             ecb.Dispose();
             UpdateRectGrowthDiagnostics(rectCountAfterStamp, stampedCount > 0);

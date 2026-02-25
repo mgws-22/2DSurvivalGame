@@ -83,9 +83,9 @@ namespace Project.Buildings.Placement
                 }
             }
 
+            requests.Clear();
             ecb.Playback(state.EntityManager);
             ecb.Dispose();
-            requests.Clear();
         }
 
         private void EnsureRequestQueueSingleton(ref SystemState state)
