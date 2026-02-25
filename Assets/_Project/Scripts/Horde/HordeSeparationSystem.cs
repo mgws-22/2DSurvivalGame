@@ -53,10 +53,15 @@ namespace Project.Horde
                     Radius = 0.20f,
                     CellSizeFactor = 1.25f,
                     InfluenceRadiusFactor = 2.00f,
+
                     SeparationStrength = 1.00f,
-                    MaxPushPerFrame = 0.2f,
+
+                    // Units/second budget (dt-scaled) :contentReference[oaicite:9]{index=9}
+                    MaxPushPerFrame = 1.5f,
+
                     MaxNeighbors = 32,
-                    Iterations = 3,
+                    Iterations = 2,
+
                     RebuildGridWhenCongested = 0,
                     CongestionCapHitFractionThreshold = 0.10f
                 });

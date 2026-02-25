@@ -46,32 +46,30 @@ namespace Project.Horde
                 {
                     Enabled = 1,
 
-                    // Pressure activates early enough to reduce jams near point targets
-                    TargetUnitsPerCell = 1f,
+                    TargetUnitsPerCell = 1.5f,
 
-                    // Much lower than 10: pressure should not feel like a separate motor
-                    PressureStrength = 2f,
+                    // Keep it subtle; pressure should not feel like a separate motor
+                    PressureStrength = 1.25f,
 
-                    // Set high so SpeedFractionCap becomes the real limiter
-                    // (behavior becomes more predictable)
-                    MaxPushPerFrame = 5.0f,
+                    // Units/second (converted to per-frame with dt) :contentReference[oaicite:3]{index=3}
+                    MaxPushPerFrame = 2.0f,
 
-                    // Pressure may use only part of the moveSpeed*dt budget
-                    SpeedFractionCap = 0.9f,
+                    // Pressure uses only part of moveSpeed*dt budget :contentReference[oaicite:4]{index=4}
+                    SpeedFractionCap = 0.45f,
 
-                    // Tuning rule: keep free-flow speed at 1.0 until pressure exceeds threshold.
-                    BackpressureThreshold = 6f,
-                    MinSpeedFactor = 0.15f,
-                    BackpressureK = 22f,
-                    BackpressureMaxFactor = 40.0f,
+                    // Backpressure is applied as: raw = 1/(1+K*excess), clamped :contentReference[oaicite:5]{index=5}
+                    BackpressureThreshold = 7.0f,
+                    MinSpeedFactor = 0.05f,
+                    BackpressureK = 2.5f,
+                    BackpressureMaxFactor = 22.0f,
 
-                    // Lower to avoid wall magnetism
-                    BlockedCellPenalty = 3.0f,
+                    // Enough to avoid drifting into blocked, but not “wall magnetism”
+                    BlockedCellPenalty = 6.0f,
 
-                    FieldUpdateIntervalFrames = 1,
+                    // Cheaper than every frame; still responsive
+                    FieldUpdateIntervalFrames = 2,
                     BlurPasses = 1,
 
-                    // Augment mode: runs together with separation
                     DisablePairwiseSeparationWhenPressureEnabled = 0
                 });
             }

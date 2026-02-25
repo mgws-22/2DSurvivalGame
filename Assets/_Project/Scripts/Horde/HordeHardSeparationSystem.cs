@@ -65,18 +65,27 @@ namespace Project.Horde
                 {
                     Enabled = 1,
                     JamOnly = 1,
+
+                    // Jam gating driven by pressure :contentReference[oaicite:7]{index=7}
                     JamPressureThreshold = 8f,
-                    DensePressureThreshold = 13f,
-                    SlowSpeedFraction = DefaultSlowSpeedFraction,
+                    DensePressureThreshold = 12f,
+
+                    SlowSpeedFraction = 0.20f,
+
                     IterationsJam = 3,
                     MaxNeighborsJam = 32,
-                    MaxPushPerFrameJam = 0.001f,
-                    Radius = 0.2f,
-                    CellSize = 0.20f,
+
+                    // Position correction caps (treat as "max correction per iter")
+                    MaxPushPerFrameJam = 0.02f,
+
+                    Radius = 0.20f,
+                    CellSize = 0.50f,          // ~= (2*Radius)*1.25 = 0.4*1.25 = 0.5
+
                     MaxNeighbors = 28,
                     Iterations = 2,
-                    MaxCorrectionPerIter = 0.001f,
-                    Slop = 0.001f
+
+                    MaxCorrectionPerIter = 0.02f,
+                    Slop = 0.002f
                 });
             }
 
