@@ -1,5 +1,28 @@
 # DevLog
 
+## 2026-02-22 - Wall baking fix workflow (move scene walls into SubScene)
+
+### What changed
+- Added editor utility for wall SubScene workflow:
+  - `Assets/_Project/Scripts/Editor/Buildings/WallSubSceneTools.cs`
+  - Menu: `Tools/Buildings/Create/Ensure StaticBuildings SubScene`
+  - Menu: `Tools/Buildings/Move Selected Walls To StaticBuildings SubScene`
+  - Menu: `Tools/Buildings/Validate Wall Baking`
+- Updated building obstacle docs:
+  - `Docs/Systems/Buildings/BuildingObstacles.md`
+
+### Why
+- Walls authored only as GameObjects in the main scene hierarchy do not bake into ECS entities.
+- Without baked `BuildingTag` entities, the obstacle stamp pipeline does not run and wall footprints do not block zombies.
+
+### How to test
+1. In the main scene hierarchy, select wall GameObjects (`Wall`, `Wall (1)`, etc.).
+2. Run `Tools > Buildings > Move Selected Walls To StaticBuildings SubScene`.
+3. Enter Play Mode.
+4. Open Entities Hierarchy (Default World) and search `c:BuildingTag`.
+5. Run `Tools > Buildings > Validate Wall Baking` and confirm a non-zero count is logged.
+6. Verify enemies no longer pass through the moved wall footprints after obstacle stamping runs.
+
 ## 2026-02-17 - Map generation v1 (noise band-pass labyrinth)
 
 ### What changed

@@ -27,10 +27,10 @@ namespace Project.Horde
                 Entity e = state.EntityManager.CreateEntity(typeof(WallRepulsionConfig));
                 state.EntityManager.SetComponentData(e, new WallRepulsionConfig
                 {
-                    UnitRadiusWorld = 0.2f,
-                    WallPushStrength = 10.4f,
-                    MaxWallPushPerFrame = 0.35f,
-                    ProjectionSearchRadiusCells = 1
+                    UnitRadiusWorld = 1f,
+                    WallPushStrength = 2000.4f,
+                    MaxWallPushPerFrame = 22f,
+                    ProjectionSearchRadiusCells = 2
                 });
             }
         }
@@ -71,7 +71,7 @@ namespace Project.Horde
         [BurstCompile]
         private partial struct WallRepulsionJob : IJobEntity
         {
-            private const float ProjectionInsetFactor = 0.001f;
+            private const float ProjectionInsetFactor = 0.01f;
 
             public MapRuntimeData Map;
             [ReadOnly] public NativeArray<MapWalkableCell> Walkable;

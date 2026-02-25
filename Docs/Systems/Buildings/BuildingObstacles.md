@@ -21,6 +21,9 @@ Runtime systems:
 Authoring / editor:
 - `WallBuildingAuthoring` (`Assets/_Project/Scripts/Buildings/WallBuildingAuthoring.cs`)
 - `Tools/Buildings/Create Wall Prefab` (`Assets/_Project/Editor/Tools/BuildingPrefabTool.cs`)
+- `Tools/Buildings/Create/Ensure StaticBuildings SubScene` (`Assets/_Project/Scripts/Editor/Buildings/WallSubSceneTools.cs`)
+- `Tools/Buildings/Move Selected Walls To StaticBuildings SubScene` (`Assets/_Project/Scripts/Editor/Buildings/WallSubSceneTools.cs`)
+- `Tools/Buildings/Validate Wall Baking` (`Assets/_Project/Scripts/Editor/Buildings/WallSubSceneTools.cs`)
 
 ## Runtime Logic
 1. A wall building prefab bakes `BuildingTag` + `BuildingFootprint`.
@@ -35,11 +38,18 @@ Authoring / editor:
 
 ## Invariants
 - Buildings added by this pipeline block zombies through wall repulsion only.
+- Static scene wall GameObjects must be inside a SubScene to bake into `BuildingTag` entities.
 - Flow field pathfinding is unchanged; zombies may jam against buildings instead of pathing around them.
 - `BuildingObstacleStampSystem` dirties only `WallFieldDirtyTag` (never `FlowFieldDirtyTag`).
 - Dynamic obstacle rectangles are stored in map-cell space.
 - Wall repulsion hot path does not scan the obstacle rectangle list per zombie.
 - No Unity Physics colliders or rigidbodies are required.
+
+## Static Scene Wall Workflow
+1. Place or select wall GameObjects in the main scene hierarchy.
+2. Run `Tools/Buildings/Move Selected Walls To StaticBuildings SubScene`.
+3. The tool creates/ensures `StaticBuildingsSubScene` and moves the selected wall GameObjects into its editing scene.
+4. In Play Mode, baked wall entities should appear in the Default World as `BuildingTag` and be picked up by `BuildingObstacleStampSystem`.
 
 ## Performance
 - Stamping is intended to be rare (on building spawn/creation), not a per-frame hot path.

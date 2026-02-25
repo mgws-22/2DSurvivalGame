@@ -53,7 +53,7 @@ namespace Project.Horde
                     Radius = 0.20f,
                     CellSizeFactor = 1.25f,
                     InfluenceRadiusFactor = 2.00f,
-                    SeparationStrength = 1.00f,
+                    SeparationStrength = 5.00f,
                     MaxPushPerFrame = 2.2f,
                     MaxNeighbors = 32,
                     Iterations = 3,
