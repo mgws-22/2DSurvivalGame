@@ -120,23 +120,23 @@ namespace Project.Horde
                 Enabled = 1,
                 TargetUnitsPerCell = 1.5f,
                 PressureStrength = 1.25f,
-                MaxPushPerFrame = 2.0f,
+                MaxPushPerFrame = 0f,
                 SpeedFractionCap = 0.45f,
                 PressureParallelScale = 0.35f,
                 PressurePerpScale = 1.25f,
                 WallTangentStrength = 0.75f,
                 WallTangentMaxPushPerFrame = 1.25f,
                 WallNearDistanceCells = 1.25f,
-                DenseUnitsPerCellThreshold = 5.0f,
+                DenseUnitsPerCellThreshold = 0.01f,
                 BackpressureThreshold = 10.0f,
-                MinSpeedFactor = 0.15f,
+                MinSpeedFactor = 0.01f,
                 BackpressureK = 0.5f,
                 BackpressureMaxFactor = 22.0f,
                 BlockedCellPenalty = 6.0f,
                 FieldUpdateIntervalFrames = 2,
                 BlurPasses = 1,
                 DisablePairwiseSeparationWhenPressureEnabled = 0,
-                EnableWallTangentDriftDebug = 0
+                EnableWallTangentDriftDebug = 1
             };
         }
 

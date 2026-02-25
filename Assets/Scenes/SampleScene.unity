@@ -4169,6 +4169,7 @@ GameObject:
   - component: {fileID: 1862250333}
   - component: {fileID: 1862250332}
   - component: {fileID: 1862250334}
+  - component: {fileID: 1862250335}
   m_Layer: 0
   m_Name: GameObject
   m_TagString: Untagged
@@ -4234,6 +4235,38 @@ MonoBehaviour:
   _iterations: 2
   _maxCorrectionPerIter: 2
   _slop: 0.001
+--- !u!114 &1862250335
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1862250331}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8fb84e2b54e9ea846b0930562e0d7020, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Project.Horde.HordePressureConfigAuthoring
+  _enabled: 1
+  _targetUnitsPerCell: 22
+  _pressureStrength: 222
+  _maxPushPerFrame: 222
+  _speedFractionCap: 0.45
+  _pressureParallelScale: 0.35
+  _pressurePerpScale: 222
+  _wallTangentStrength: 222
+  _wallTangentMaxPushPerFrame: 222
+  _wallNearDistanceCells: 222
+  _denseUnitsPerCellThreshold: 0
+  _enableWallTangentDriftDebug: 1
+  _backpressureThreshold: 10
+  _minSpeedFactor: 0.15
+  _backpressureK: 0.5
+  _backpressureMaxFactor: 22
+  _blockedCellPenalty: 6
+  _fieldUpdateIntervalFrames: 2
+  _blurPasses: 1
+  _disablePairwiseSeparationWhenPressureEnabled: 0
 --- !u!1 &1938285032
 GameObject:
   m_ObjectHideFlags: 0
