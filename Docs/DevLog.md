@@ -1,5 +1,71 @@
 # DevLog
 
+## 2026-02-25 - Wall placement click fix (UI hit test + validity feedback + runtime catalog sync)
+
+### What changed
+- Hardened runtime wall placement input and validation feedback:
+  - `Assets/_Project/Scripts/Buildings/Placement/BuildingPlacementController.cs`
+  - manual UI raycast hit test via cached `PointerEventData` + static `List<RaycastResult>`
+  - supports both Input System and legacy `Input.GetMouseButtonDown`
+  - per-frame validity reason status text (`Cannot place: ...`)
+  - ghost tint feedback (green valid / red invalid)
+  - one-shot development runtime diagnostics when entering placement
+- Updated build HUD status text wiring:
+  - `Assets/_Project/Scripts/UI/BuildMenu/BuildMenuController.cs`
+- Updated HUD setup tool raycast targets so only buttons block UI clicks:
+  - `Assets/_Project/Editor/Tools/BuildHudSetupTool.cs`
+- Added runtime ECS sync bridge for building prefab catalog singleton:
+  - `Assets/_Project/Scripts/Buildings/Placement/BuildingPrefabCatalogAuthoring.cs`
+- Updated system docs:
+  - `Docs/Systems/Buildings/BuildingObstacles.md`
+
+### Why
+- Ghost preview appearing but LMB placing nothing could be caused by silent validation failure, false-positive UI hit tests, or missing runtime `BuildingPrefabCatalog` singleton.
+- This change makes the failure reason visible in the HUD and fixes the common runtime catalog singleton gap so wall placement can succeed in Play Mode.
+
+### How to test
+1. Enter Play Mode and click `Wall`.
+2. Move mouse across map and verify ghost turns green on valid cells and red on invalid cells.
+3. Verify status text shows `Placing: Wall (LMB place, RMB cancel)` on valid cells and `Cannot place: ...` on invalid cells.
+4. LMB on a green cell and confirm `c:BuildingTag` count increases in Entities Hierarchy.
+5. LMB over the build HUD buttons and confirm no wall is placed.
+6. RMB anywhere and confirm placement cancels.
+7. Profile and confirm `GC Alloc = 0 B` in the gameplay loop.
+
+## 2026-02-25 - RTS build HUD + runtime wall placement (ECS requests)
+
+### What changed
+- Added runtime build HUD + wall placement input:
+  - `Assets/_Project/Scripts/UI/BuildMenu/BuildMenuController.cs`
+  - `Assets/_Project/Scripts/UI/BuildMenu/BuildMenuButton.cs`
+  - `Assets/_Project/Scripts/Buildings/Placement/BuildingPlacementController.cs`
+- Added ECS placement request path and wall prefab catalog:
+  - `Assets/_Project/Scripts/Buildings/Placement/BuildingPlacementComponents.cs`
+  - `Assets/_Project/Scripts/Buildings/Placement/BuildingPlacementSystem.cs`
+  - `Assets/_Project/Scripts/Buildings/Placement/BuildingPrefabCatalogAuthoring.cs`
+- Added editor setup utility:
+  - `Assets/_Project/Editor/Tools/BuildHudSetupTool.cs`
+  - Menu: `Tools/Buildings/Setup Build HUD (SampleScene)`
+- Added execution plan:
+  - `Plans/BuildHudWallPlacement_ExecPlan.md`
+- Updated building obstacle docs:
+  - `Docs/Systems/Buildings/BuildingObstacles.md`
+
+### Why
+- Needed a simple in-game build UI and runtime placement flow for walls without changing flow-field pathfinding.
+- Walls must block enemies only through the existing dynamic obstacle -> wall-field -> wall-repulsion pipeline.
+- Placement must be grid-snapped, unlimited while active, and avoid per-frame heavy scans or GC churn.
+
+### How to test
+1. Run `Tools > Buildings > Setup Build HUD (SampleScene)`.
+2. Enter Play Mode and verify only the bottom-left grid button is active with label `Deffens Buildings`.
+3. Click `Deffens Buildings` and verify the header changes to `Defense Buildings` and only bottom-left `Wall` is active.
+4. Click `Wall` and confirm the ghost preview snaps to single map cells.
+5. LMB place multiple walls on walkable ground; verify duplicate placement on the same occupied cell is rejected.
+6. RMB cancel placement and confirm the ghost disappears and the status text clears.
+7. In Entities Hierarchy, search `c:BuildingTag` and verify the count increases as walls are placed.
+8. Confirm enemies jam against placed walls (no reroute) and profile `GC Alloc = 0 B` in the gameplay loop.
+
 ## 2026-02-22 - Wall baking fix workflow (move scene walls into SubScene)
 
 ### What changed
