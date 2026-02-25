@@ -54,20 +54,20 @@ namespace Project.Horde
                     TargetUnitsPerCell = 1.5f,
 
                     // Keep it subtle; pressure should not feel like a separate motor
-                    PressureStrength = 1.25f,
+                    PressureStrength = 122.25f,
 
                     // Units/second (converted to per-frame with dt) :contentReference[oaicite:3]{index=3}
-                    MaxPushPerFrame = 2.0f,
+                    MaxPushPerFrame = 122.0f,
 
                     // Pressure uses only part of moveSpeed*dt budget :contentReference[oaicite:4]{index=4}
-                    SpeedFractionCap = 0.45f,
+                    SpeedFractionCap = 22.45f,
 
-                    PressureParallelScale = 0.35f,
-                    PressurePerpScale = 1.15f,
+                    PressureParallelScale = 0.05f,
+                    PressurePerpScale = 3.25f,
                     WallTangentStrength = 22.75f,
-                    WallTangentMaxPushPerFrame = 22.25f,
-                    WallNearDistanceCells = 21.25f,
-                    DenseUnitsPerCellThreshold = 52.0f,
+                    WallTangentMaxPushPerFrame = 2.25f,
+                    WallNearDistanceCells = 1000f,
+                    DenseUnitsPerCellThreshold = 00f,
 
                     // Backpressure is applied as: raw = 1/(1+K*excess), clamped :contentReference[oaicite:5]{index=5}
                     BackpressureThreshold = 10.0f,

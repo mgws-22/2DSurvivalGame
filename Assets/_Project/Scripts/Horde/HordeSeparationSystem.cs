@@ -54,10 +54,10 @@ namespace Project.Horde
                     CellSizeFactor = 1.25f,
                     InfluenceRadiusFactor = 3.00f,
 
-                    SeparationStrength = 20.00f,
+                    SeparationStrength = 5.00f,
 
                     // Units/second budget (dt-scaled) :contentReference[oaicite:9]{index=9}
-                    MaxPushPerFrame = 6.5f,
+                    MaxPushPerFrame = 3.5f,
 
                     MaxNeighbors = 32,
                     Iterations = 2,
