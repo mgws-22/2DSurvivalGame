@@ -129,10 +129,10 @@ namespace Project.Horde
 
                 PressureStrength = 13.0f,
                 MaxPushPerFrame = 12.0f,
-                SpeedFractionCap = 1.0f,
+                SpeedFractionCap = 22.0f,
 
-                PressureParallelScale = 0.05f,
-                PressurePerpScale = 3.0f,
+                PressureParallelScale = 22f,
+                PressurePerpScale = 22.0f,
 
                 WallTangentStrength = 6.0f,
                 WallTangentMaxPushPerFrame = 6.0f,
@@ -140,10 +140,10 @@ namespace Project.Horde
                 DenseUnitsPerCellThreshold = 0.5f,
 
                 // Backpressure: keep flow from endlessly feeding the queue
-                BackpressureThreshold = 6.0f,
-                MinSpeedFactor = 0.20f,
+                BackpressureThreshold = 1.0f,
+                MinSpeedFactor = 0.2f,
                 BackpressureK = 0.35f,
-                BackpressureMaxFactor = 1.0f,
+                BackpressureMaxFactor = 12222.0f,
 
                 BlockedCellPenalty = 6.0f,
                 FieldUpdateIntervalFrames = 1,
@@ -154,7 +154,7 @@ namespace Project.Horde
                 // Turn on temporarily to confirm gating triggers
                 EnableWallTangentDriftDebug = 1,
 
-                DebugForceTangent = 0
+                DebugForceTangent = 1
             };
         }
 
@@ -858,7 +858,6 @@ namespace Project.Horde
                 }
 
                 bool densityHigh = debugForceTangent || localDensity >= DenseUnitsPerCellThreshold;
-                bool wallNear = false;
                 float2 wallNormal = float2.zero;
                 float2 tangentDelta = float2.zero;
 
@@ -866,7 +865,6 @@ namespace Project.Horde
                 {
                     if (debugForceTangent)
                     {
-                        wallNear = true;
                         CountDebugCounter(DebugCounterEligible);
                         tangentDelta = ComputeDebugForceTangentDelta(effectiveCap);
                     }
@@ -875,7 +873,6 @@ namespace Project.Horde
                         float wallDistCells;
                         if (TryGetWallNearData(position, out wallNormal, out wallDistCells) && wallDistCells <= WallNearDistanceCells)
                         {
-                            wallNear = true;
                             CountDebugCounter(DebugCounterEligible);
                             tangentDelta = ComputeWallTangentDelta(wallNormal, desiredDir);
                         }
