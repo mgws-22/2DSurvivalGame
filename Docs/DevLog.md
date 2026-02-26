@@ -1726,3 +1726,28 @@
 5. Set `Enabled = 0` and verify pressure/tangent effects disappear (and pressure system returns early).
 6. If `eligible = 0`, set `WallNearDistanceCells` large and `DenseUnitsPerCellThreshold = 0`; if still zero, set `DebugForceTangent = 1` and verify `tangentApplied > 0`.
 7. Confirm `GC Alloc = 0 B` in gameplay loop.
+
+## 2026-02-26 - Horde wall tangent symmetry breaker + magnitude debug averages
+
+### What changed
+- Updated `Assets/_Project/Scripts/Horde/HordePressureFieldSystem.cs` wall tangent sign selection:
+  - tangent now starts from a deterministic per-entity sign (`EntityIndexInQuery` parity) to break mirrored wall-lane symmetry
+  - optional alignment to flow/goal direction only flips when `dot(tangent, alignDir) < -0.1` (near-zero ties keep the deterministic sign)
+- Extended pressure debug instrumentation (debug flag gated, throttled) with per-thread float magnitude sums and reduced averages:
+  - `avgTan` (average tangent magnitude when tangent was applied)
+  - `avgPress` (average pressure magnitude when pressure was applied)
+  - `avgDelta` (average final applied delta magnitude after walkability acceptance)
+  - added `finalApplied` counter
+
+### Why
+- Tangent drift was being applied, but many agents still chose the same tangent direction near walls, preserving queue-like wall lanes.
+- Alternating deterministic tangent sign breaks symmetry without randomness and remains Burst-friendly/deterministic.
+- Magnitude averages make it easier to confirm tangent/pressure contributions are large enough to matter visually.
+
+### How to test
+1. Enter Play Mode and create a long wall with a dense horde sliding along it.
+2. Set `EnableWallTangentDriftDebug = 1` on `HordePressureConfig`.
+3. Confirm throttled log includes `avgTan`, `avgPress`, `avgDelta`, and `finalApplied`.
+4. Verify `tangentApplied` remains non-zero and wall-side queues look less single-file (more lateral spreading).
+5. If still too weak, use the logged `avgTan` to tune `WallTangentStrength` / `WallTangentMaxPushPerFrame`.
+6. Confirm `GC Alloc = 0 B` in gameplay loop.

@@ -27,7 +27,9 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
 8. Applies anisotropic scaling to the pressure displacement before the final clamp:
    - parallel to desired movement (`PressureParallelScale`)
    - perpendicular to desired movement (`PressurePerpScale`)
-9. When wall-near and locally dense, adds a wall-tangent drift (aligned to goal direction sign) to encourage lateral spread along long walls instead of queue-like compression.
+9. When wall-near and locally dense, adds a wall-tangent drift to encourage lateral spread along long walls instead of queue-like compression:
+   - deterministic per-entity lane sign (alternating by `EntityIndexInQuery`) breaks symmetry
+   - optional flow/goal alignment only flips when `dot(tangent, alignDir) < -0.1` so near-zero ties keep the symmetry breaker
 10. Combined pressure+tangent displacement is speed-capped using dt-normalized config budget: `min(MaxPushPerFrame * dt, moveSpeed * dt * SpeedFractionCap)`.
 11. Resizes the singleton `PressureCell` buffer on the main thread only when cell count changes, before scheduling publish.
 12. Publishes the active pressure grid to the resized buffer in a dedicated job (`BufferLookup<PressureCell>`), where the job writes values only (no length/capacity changes).
@@ -80,7 +82,8 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
 - No structural entity changes and no manual sync points.
 - No `Complete()` sync points in normal gameplay; publish copy stays scheduled/jobified.
 - Optional debug logging is throttled (`120` frames) and only attempts to read the previous frame count when the job handle is already complete.
-- Debug counters are tracked in a persistent per-thread buffer (eligible / pressureApplied / tangentApplied / densityValid / invalidWall).
+- Debug counters are tracked in a persistent per-thread buffer (eligible / pressureApplied / tangentApplied / densityValid / invalidWall / finalApplied).
+- Debug magnitude sums are tracked in a persistent per-thread float buffer (`sumTangent`, `sumPressure`, `sumFinalDelta`) and reduced on the main thread only for throttled debug logging.
 - Pressure publish lookup is created in `OnCreate` and updated per frame (`.Update(ref state)`), avoiding per-frame lookup creation overhead.
 
 ## Verification
@@ -93,7 +96,7 @@ Add a scalable congestion-avoidance pass using a density/pressure field on the e
    - fewer ultra-tight single-file lines hugging the wall
    - movement remains smooth (no visible jitter increase)
 6. Optional debug: set `EnableWallTangentDriftDebug = 1` and confirm a throttled log appears roughly every `120` frames:
-   - `[HordePressure] eligible=E pressureApplied=P tangentApplied=T densityValid=D invalidWall=W frame=F`
+   - `[HordePressure] eligible=E pressureApplied=P tangentApplied=T finalApplied=F avgTan=... avgPress=... avgDelta=... densityValid=D invalidWall=W frame=N`
 7. If `eligible` remains `0`, set `DebugForceTangent = 1` to force tangent application for the first few zombies and verify `tangentApplied > 0`.
 8. Open `Window > Entities > Hierarchy`, select `Default World`, and search for `HordePressureConfig` to verify the singleton exists.
 9. Profiler watchlist:

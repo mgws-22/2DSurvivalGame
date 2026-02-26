@@ -20,12 +20,17 @@ namespace Project.Horde
         private const float Epsilon = 1e-6f;
         private const float Diagonal = 0.70710677f;
         private const int DebugLogIntervalFrames = 120;
-        private const int DebugCounterCount = 5;
+        private const int DebugCounterCount = 6;
         private const int DebugCounterEligible = 0;
         private const int DebugCounterPressureApplied = 1;
         private const int DebugCounterTangentApplied = 2;
         private const int DebugCounterDensityValid = 3;
         private const int DebugCounterInvalidWallSample = 4;
+        private const int DebugCounterFinalDeltaApplied = 5;
+        private const int DebugSumCount = 3;
+        private const int DebugSumTangentMag = 0;
+        private const int DebugSumPressureMag = 1;
+        private const int DebugSumFinalDeltaMag = 2;
 
         private NativeArray<int> _density;
         private NativeArray<int> _densityPerThread;
@@ -33,6 +38,7 @@ namespace Project.Horde
         private NativeArray<float> _pressureA;
         private NativeArray<float> _pressureB;
         private NativeArray<int> _debugCountersPerThread;
+        private NativeArray<float> _debugSumsPerThread;
         private int _cellCount;
         private int _frameIndex;
         private byte _activePressureBuffer;
@@ -73,6 +79,7 @@ namespace Project.Horde
             _pressureLookup = state.GetBufferLookup<PressureCell>(false);
             int maxWorkerCount = math.max(1, JobsUtility.MaxJobThreadCount);
             _debugCountersPerThread = new NativeArray<int>(maxWorkerCount * DebugCounterCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _debugSumsPerThread = new NativeArray<float>(maxWorkerCount * DebugSumCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             _lastApplyPressureHandle = default;
             _hasLastApplyPressureHandle = 0;
             _lastWallTangentDebugLogFrame = -DebugLogIntervalFrames;
@@ -183,6 +190,11 @@ namespace Project.Horde
             if (_debugCountersPerThread.IsCreated)
             {
                 _debugCountersPerThread.Dispose();
+            }
+
+            if (_debugSumsPerThread.IsCreated)
+            {
+                _debugSumsPerThread.Dispose();
             }
 
             _cellCount = 0;
@@ -344,6 +356,14 @@ namespace Project.Horde
                 };
                 dependency = clearWallTangentDebugJob.Schedule(_debugCountersPerThread.Length, 32, dependency);
             }
+            if (wallTangentDebugEnabled && _debugSumsPerThread.IsCreated)
+            {
+                ClearFloatArrayJob clearWallTangentDebugSumsJob = new ClearFloatArrayJob
+                {
+                    Values = _debugSumsPerThread
+                };
+                dependency = clearWallTangentDebugSumsJob.Schedule(_debugSumsPerThread.Length, 32, dependency);
+            }
             NativeArray<float> activePressure = _activePressureBuffer == 0 ? _pressureA : _pressureB;
 
             if (_pressureFieldEntity == Entity.Null || !state.EntityManager.Exists(_pressureFieldEntity))
@@ -456,7 +476,8 @@ namespace Project.Horde
                 DeltaTime = deltaTime,
                 WallTangentDebugEnabled = wallTangentDebugEnabled ? (byte)1 : (byte)0,
                 DebugForceTangentEnabled = debugForceTangentEnabled ? (byte)1 : (byte)0,
-                DebugCountersPerThread = _debugCountersPerThread
+                DebugCountersPerThread = _debugCountersPerThread,
+                DebugSumsPerThread = _debugSumsPerThread
             };
             JobHandle applyHandle = applyPressureJob.ScheduleParallel(dependency);
             state.Dependency = applyHandle;
@@ -489,12 +510,23 @@ namespace Project.Horde
             int tangentApplied = SumDebugCounter(DebugCounterTangentApplied);
             int densityValid = SumDebugCounter(DebugCounterDensityValid);
             int invalidWall = SumDebugCounter(DebugCounterInvalidWallSample);
+            int finalDeltaApplied = SumDebugCounter(DebugCounterFinalDeltaApplied);
+            float sumTan = SumDebugSum(DebugSumTangentMag);
+            float sumPress = SumDebugSum(DebugSumPressureMag);
+            float sumFinal = SumDebugSum(DebugSumFinalDeltaMag);
+            float avgTan = tangentApplied > 0 ? (sumTan / tangentApplied) : 0f;
+            float avgPress = pressureApplied > 0 ? (sumPress / pressureApplied) : 0f;
+            float avgDelta = finalDeltaApplied > 0 ? (sumFinal / finalDeltaApplied) : 0f;
 
             _lastWallTangentDebugLogFrame = _frameIndex;
             UnityEngine.Debug.Log(
                 "[HordePressure] eligible=" + eligible +
                 " pressureApplied=" + pressureApplied +
                 " tangentApplied=" + tangentApplied +
+                " finalApplied=" + finalDeltaApplied +
+                " avgTan=" + avgTan.ToString("F4") +
+                " avgPress=" + avgPress.ToString("F4") +
+                " avgDelta=" + avgDelta.ToString("F4") +
                 " densityValid=" + densityValid +
                 " invalidWall=" + invalidWall +
                 " frame=" + _frameIndex + ".");
@@ -513,6 +545,24 @@ namespace Project.Horde
             {
                 int baseIndex = i * DebugCounterCount;
                 sum += _debugCountersPerThread[baseIndex + counterIndex];
+            }
+
+            return sum;
+        }
+
+        private float SumDebugSum(int sumIndex)
+        {
+            if (!_debugSumsPerThread.IsCreated || sumIndex < 0 || sumIndex >= DebugSumCount)
+            {
+                return 0f;
+            }
+
+            int workerCount = _debugSumsPerThread.Length / DebugSumCount;
+            float sum = 0f;
+            for (int i = 0; i < workerCount; i++)
+            {
+                int baseIndex = i * DebugSumCount;
+                sum += _debugSumsPerThread[baseIndex + sumIndex];
             }
 
             return sum;
@@ -565,6 +615,17 @@ namespace Project.Horde
             public void Execute(int index)
             {
                 Values[index] = 0;
+            }
+        }
+
+        [BurstCompile]
+        private struct ClearFloatArrayJob : IJobParallelFor
+        {
+            public NativeArray<float> Values;
+
+            public void Execute(int index)
+            {
+                Values[index] = 0f;
             }
         }
 
@@ -739,14 +800,20 @@ namespace Project.Horde
         [BurstCompile]
         private partial struct ApplyPressureJob : IJobEntity
         {
-            private const int DebugCounterCount = 5;
+            private const int DebugCounterCount = 6;
             private const int DebugCounterEligible = 0;
             private const int DebugCounterPressureApplied = 1;
             private const int DebugCounterTangentApplied = 2;
             private const int DebugCounterDensityValid = 3;
             private const int DebugCounterInvalidWallSample = 4;
+            private const int DebugCounterFinalDeltaApplied = 5;
+            private const int DebugSumCount = 3;
+            private const int DebugSumTangentMag = 0;
+            private const int DebugSumPressureMag = 1;
+            private const int DebugSumFinalDeltaMag = 2;
             private const int DebugForceTangentFirstN = 32;
             private const float DebugForceTangentDelta = 0.05f;
+            private const float TangentSignAlignDotEpsilon = 0.1f;
 
             [ReadOnly] public BlobAssetReference<FlowFieldBlob> Flow;
             [ReadOnly] public BlobAssetReference<WallFieldBlob> Wall;
@@ -768,6 +835,7 @@ namespace Project.Horde
             public byte WallTangentDebugEnabled;
             public byte DebugForceTangentEnabled;
             [NativeDisableParallelForRestriction] public NativeArray<int> DebugCountersPerThread;
+            [NativeDisableParallelForRestriction] public NativeArray<float> DebugSumsPerThread;
             [NativeSetThreadIndex] public int ThreadIndex;
 
             private void Execute(
@@ -874,19 +942,23 @@ namespace Project.Horde
                         if (TryGetWallNearData(position, out wallNormal, out wallDistCells) && wallDistCells <= WallNearDistanceCells)
                         {
                             CountDebugCounter(DebugCounterEligible);
-                            tangentDelta = ComputeWallTangentDelta(wallNormal, desiredDir);
+                            tangentDelta = ComputeWallTangentDelta(wallNormal, desiredDir, flowDirection, entityIndex);
                         }
                     }
                 }
 
-                if (math.lengthsq(pressureDelta) > Epsilon)
+                float pressureLenSq = math.lengthsq(pressureDelta);
+                if (pressureLenSq > Epsilon)
                 {
                     CountDebugCounter(DebugCounterPressureApplied);
+                    AccumulateDebugSum(DebugSumPressureMag, math.sqrt(pressureLenSq));
                 }
 
-                if (math.lengthsq(tangentDelta) > Epsilon)
+                float tangentLenSq = math.lengthsq(tangentDelta);
+                if (tangentLenSq > Epsilon)
                 {
                     CountDebugCounter(DebugCounterTangentApplied);
+                    AccumulateDebugSum(DebugSumTangentMag, math.sqrt(tangentLenSq));
                 }
 
                 float2 totalDelta = pressureDelta + tangentDelta;
@@ -907,6 +979,8 @@ namespace Project.Horde
                     return;
                 }
 
+                CountDebugCounter(DebugCounterFinalDeltaApplied);
+                AccumulateDebugSum(DebugSumFinalDeltaMag, math.sqrt(math.lengthsq(candidate - position)));
                 transform.Position = new float3(candidate.x, candidate.y, transform.Position.z);
             }
 
@@ -921,15 +995,9 @@ namespace Project.Horde
                 return new float2(0f, push);
             }
 
-            private float2 ComputeWallTangentDelta(float2 wallNormal, float2 desiredDir)
+            private float2 ComputeWallTangentDelta(float2 wallNormal, float2 desiredDir, float2 flowDirection, int entityIndex)
             {
                 if (WallTangentStrength <= 0f || WallTangentMaxPush <= 0f)
-                {
-                    return float2.zero;
-                }
-
-                float desiredLenSq = math.lengthsq(desiredDir);
-                if (desiredLenSq <= Epsilon)
                 {
                     return float2.zero;
                 }
@@ -942,9 +1010,25 @@ namespace Project.Horde
                 }
 
                 tangent *= math.rsqrt(tangentLenSq);
-                if (math.dot(tangent, desiredDir) < 0f)
+                float deterministicSign = ((entityIndex & 1) == 0) ? 1f : -1f;
+                tangent *= deterministicSign;
+
+                float2 alignDir = flowDirection;
+                float alignLenSq = math.lengthsq(alignDir);
+                if (alignLenSq <= Epsilon)
                 {
-                    tangent = -tangent;
+                    alignDir = desiredDir;
+                    alignLenSq = math.lengthsq(alignDir);
+                }
+
+                if (alignLenSq > Epsilon)
+                {
+                    alignDir *= math.rsqrt(alignLenSq);
+                    float alignDot = math.dot(tangent, alignDir);
+                    if (alignDot < -TangentSignAlignDotEpsilon)
+                    {
+                        tangent = -tangent;
+                    }
                 }
 
                 float tangentPush = math.min(WallTangentStrength * DeltaTime, WallTangentMaxPush);
@@ -972,6 +1056,24 @@ namespace Project.Horde
                 int workerIndex = math.clamp(ThreadIndex - 1, 0, workerCount - 1);
                 int baseIndex = workerIndex * DebugCounterCount;
                 DebugCountersPerThread[baseIndex + counterIndex] = DebugCountersPerThread[baseIndex + counterIndex] + 1;
+            }
+
+            private void AccumulateDebugSum(int sumIndex, float value)
+            {
+                if (WallTangentDebugEnabled == 0 || DebugSumsPerThread.Length <= 0 || value <= 0f)
+                {
+                    return;
+                }
+
+                if (sumIndex < 0 || sumIndex >= DebugSumCount)
+                {
+                    return;
+                }
+
+                int workerCount = DebugSumsPerThread.Length / DebugSumCount;
+                int workerIndex = math.clamp(ThreadIndex - 1, 0, workerCount - 1);
+                int baseIndex = workerIndex * DebugSumCount;
+                DebugSumsPerThread[baseIndex + sumIndex] = DebugSumsPerThread[baseIndex + sumIndex] + value;
             }
 
             private float2 ResolveDesiredDirection(float2 goalIntentDirection, float2 velocity, float2 flowDirection)
